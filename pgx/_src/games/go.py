@@ -34,6 +34,7 @@ class GameState(NamedTuple):
 
     @property
     def color(self) -> Array:
+        """ step_count % 2 """
         return self.step_count % 2
 
 
@@ -74,6 +75,10 @@ class Game:
         return state
 
     def observe(self, state: GameState, color: Optional[Array] = None) -> Array:
+        """ https://www.sotets.uk/pgx/go/#observation
+        AGZ features: most feature planes are from the perspective of current player.
+        For our purpose, we should always call observer() with: color == state.color
+        """
         if color is None:
             color = state.color
         my_sign, _ = _signs(color)
@@ -111,6 +116,7 @@ class Game:
         return two_consecutive_pass | state.is_psk | timeover
 
     def rewards(self, state: GameState) -> Array:
+        """ rewards for [black, white]. Only awarded when game is over """
         scores = _count_scores(state, self.size)
         is_black_win = scores[0] - self.komi > scores[1]
         rewards = lax.select(is_black_win, jnp.float32([1, -1]), jnp.float32([-1, 1]))
@@ -215,6 +221,7 @@ def _is_psk(state: GameState):
 
 
 def _count_scores(state: GameState, size):
+    """ TT scores for [black, white] """
     def calc_point(c):
         return _count_ji(state, c, size) + jnp.count_nonzero(state.board * c > 0)
 
@@ -222,6 +229,7 @@ def _count_scores(state: GameState, size):
 
 
 def _count_ji(state: GameState, color: int, size: int):
+    """ this counts empty points belonging to color """
     board = jnp.clip(state.board * color, -1, 1)  # my stone: 1, opp stone: -1
     adj_mat = jax.vmap(_adj_ixs, in_axes=(0, None))(jnp.arange(size**2), size)  # (size**2, 4)
 

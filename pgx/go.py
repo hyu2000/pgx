@@ -60,6 +60,13 @@ class Go(core.Env):
         )
 
     def _init(self, key: PRNGKey) -> State:
+        """ See core.State comment.
+        player_order & current_player: rather than black-player, here a player can choose a color to play.
+        current_player=state._player_order[x.color]    # player_id for the current game color
+
+        env randomly assigns a player (0/1) as black
+        Note x.color: 0 is black
+        """
         _player_order = jnp.array([[0, 1], [1, 0]])[jax.random.bernoulli(key).astype(jnp.int32)]
         x = self._game.init()
         size = self._game.size

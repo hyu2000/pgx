@@ -14,7 +14,8 @@ def _show(state: State) -> None:
     WHITE_CHAR = "O"
     POINT_CHAR = "+"
     print("===========")
-    for xy in range(state._x.size * state._x.size):
+    board_size = BOARD_SIZE
+    for xy in range(board_size * board_size):
         if state._x.board[xy] > 0:
             print(" " + BLACK_CHAR, end="")
         elif state._x.board[xy] < 0:
@@ -22,7 +23,7 @@ def _show(state: State) -> None:
         else:
             print(" " + POINT_CHAR, end="")
 
-        if xy % state._x.size == state._x.size - 1:
+        if xy % board_size == board_size - 1:
             print()
 
 
@@ -34,9 +35,55 @@ observe = jax.jit(env.observe)
 
 
 def test_init():
+    """ game can start with either player 0 or 1 (randomized) """
+    for i in range(10):
+        key = jax.random.PRNGKey(i)
+        state = init(key=key)
+        # underlying game color: 0 == black
+        assert state._x.color == 0
+        print(f'iter {i} {state._step_count} {state.current_player}')
+        if state.current_player == 1:
+            continue
+
+
+def test_no_jit():
+    env = Go(size=5, komi=0.5)
     key = jax.random.PRNGKey(0)
-    state = init(key=key)
-    assert state.current_player == 1
+    state0 = env.init(key)
+    assert state0.current_player == 0
+    assert state0._x.color == 0
+    state1 = env.step(state0, action=1)
+    assert state1.current_player == 1
+    assert state1._x.color == 1
+    state2 = env.step(state1, action=2)
+    assert state2.current_player == 0
+    assert state2._x.color == 0
+
+    key = jax.random.PRNGKey(1)
+    state10 = env.init(key)
+    assert state10.current_player == 1  # would this result in different observation?
+    assert state10._x.color == 0
+    state11 = env.step(state10, action=1)
+    assert state11.current_player == 0
+    assert state11._x.color == 1
+    state12 = env.step(state11, action=2)
+    assert state12.current_player == 1
+    assert state12._x.color == 0
+
+    # seems ok
+    obs0 = state0.observation
+    obs10 = state10.observation
+    assert (obs0 == obs10).all()
+    assert (state1.observation == state11.observation).all()
+
+
+def test_go5C2():
+    key = jax.random.PRNGKey(0)
+
+    env = Go(size=5, komi=0.5)
+    state0 = env.init(key=key)
+    state1 = env.step(state0, 17)
+    _show(state1)
 
 
 def test_end_by_pass():
@@ -61,7 +108,7 @@ def test_step():
     """
     https://www.cosumi.net/replay/?b=You&w=COSUMI&k=0&r=0&bs=5&gr=ccbccdcbdbbadabdbecaacabecaddeaettceedbetttt
     """
-    key = jax.random.PRNGKey(0)
+    key = jax.random.PRNGKey(1)
     state = init(key=key)
     assert state.current_player == 1
 
