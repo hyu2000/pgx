@@ -52,12 +52,14 @@ class Go(core.Env):
         komi: float = 7.5,
         history_length: int = 8,
         max_terminal_steps: Optional[int] = None,
+        open_move: Optional[int] = None
     ):
         super().__init__()
         assert isinstance(size, int)
         self._game = go.Game(
             size=size, komi=komi, history_length=history_length, max_termination_steps=max_terminal_steps
         )
+        self._open_move = open_move
 
     def _init(self, key: PRNGKey) -> State:
         """ See core.State comment.
@@ -70,12 +72,16 @@ class Go(core.Env):
         _player_order = jnp.array([[0, 1], [1, 0]])[jax.random.bernoulli(key).astype(jnp.int32)]
         x = self._game.init()
         size = self._game.size
-        return State(  # type:ignore
+        state = State(  # type:ignore
             current_player=_player_order[x.color],
             legal_action_mask=jnp.ones(size * size + 1, dtype=jnp.bool_),
             _player_order=_player_order,
             _x=x,
         )
+        # is this safe for jit?
+        if self._open_move is not None:
+            state = self._step(state, self._open_move, None)
+        return state
 
     def _step(self, state: core.State, action: Array, key) -> State:
         del key

@@ -46,6 +46,8 @@ EnvId = Literal[
     "chess",
     "connect_four",
     "gardner_chess",
+    "go_5x5",
+    "go_5x5C2",
     "go_9x9",
     "go_19x19",
     "hex",
@@ -361,6 +363,14 @@ def make(env_id: EnvId):  # noqa: C901
         from pgx.gardner_chess import GardnerChess
 
         return GardnerChess()
+    elif env_id == "go_5x5":
+        from pgx.go import Go
+
+        return Go(size=5, komi=0.5)
+    elif env_id == "go_5x5C2":
+        from pgx.go import Go
+
+        return Go(size=5, komi=0.5, open_move=17)
     elif env_id == "go_9x9":
         from pgx.go import Go
 

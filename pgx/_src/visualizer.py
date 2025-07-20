@@ -356,7 +356,7 @@ class Visualizer:
                     "black",
                     "gray",
                 )
-        elif _state.env_id in ("go_9x9", "go_19x19"):
+        elif _state.env_id in ("go_5x5", "go_5x5C2", "go_9x9", "go_19x19"):
             from pgx._src.dwg.go import _make_go_dwg
 
             self.config["GRID_SIZE"] = 25

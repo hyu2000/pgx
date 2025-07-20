@@ -258,7 +258,7 @@ def evaluate(rng_key, my_model):
     return R
 
 
-if __name__ == "__main__":
+def main():
     wandb.init(project="pgx-az", config=config.model_dump())
 
     # Initialize model and opt_state
@@ -362,3 +362,7 @@ if __name__ == "__main__":
                 "frames": frames,
             }
         )
+
+
+if __name__ == "__main__":
+    main()
