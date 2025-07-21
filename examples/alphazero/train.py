@@ -37,7 +37,7 @@ num_devices = len(devices)
 
 
 class Config(BaseModel):
-    env_id: pgx.EnvId = "go_9x9"
+    env_id: pgx.EnvId = "go_5x5"
     seed: int = 0
     max_num_iters: int = 400
     # network params
@@ -45,14 +45,15 @@ class Config(BaseModel):
     num_layers: int = 6
     resnet_v2: bool = True
     # selfplay params
-    selfplay_batch_size: int = 1024
+    selfplay_batch_size: int = 1024   # #games
     num_simulations: int = 32
-    max_num_steps: int = 256
+    max_num_steps: int = 256  # max_num_moves per game
     # training params
-    training_batch_size: int = 4096
+    training_batch_size: int = 4096   # #samples per batch
     learning_rate: float = 0.001
     # eval params
     eval_interval: int = 5
+    checkpoint_interval: int = 5
 
     class Config:
         extra = "forbid"
@@ -297,8 +298,10 @@ def main():
                 }
             )
 
+        if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
             model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (model, opt_state))
+            print(f'checkpointing to {ckpt_dir}')
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
