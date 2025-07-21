@@ -1,3 +1,5 @@
+import pickle
+
 import jax
 import jax.numpy as jnp
 import pgx
@@ -5,6 +7,7 @@ import pgx
 import haiku as hk
 
 from examples.alphazero.network import AZNet
+from examples.alphazero.config import Config
 
 #from IPython.display import *
 
@@ -13,10 +16,23 @@ print(jax.__version__)
 print(hk.__version__)
 
 
+def test_load_checkpoint():
+    local_dir = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722021439'
+    with open(f'{local_dir}/000000.ckpt', 'rb') as f:
+        d = pickle.load(f)
+        print(d.keys())
+
+
+def sample_legal_action(rng_key, logits, legal_mask):
+    masked_logits = jnp.where(legal_mask, logits, -jnp.inf)
+    return jax.random.categorical(rng_key, logits=masked_logits, axis=-1)
+
+
 def test_run_game():
     """ runs on jax cpu! jax-metal 0.1.1 erred out """
-    env_id = "go_9x9"
-    model_id = "go_9x9_v0"
+    env_id = "go_5x5"
+    model_id = f"{env_id}_v0"
+    rng_key = jax.random.PRNGKey(1)
 
     env = pgx.make(env_id)
     # model is a function: model(state.observation)
@@ -27,16 +43,19 @@ def test_run_game():
 
     states = []
     batch_size = 1
-    keys = jax.random.split(jax.random.PRNGKey(0), batch_size)
+    rng_key, key2 = jax.random.split(rng_key)
+    keys = jax.random.split(key2, batch_size)
     state = init_fn(keys)
     states.append(state)
     while not (state.terminated | state.truncated).all():
         logits, value = model(state.observation)
-        action = logits.argmax(axis=-1)
+        # action = logits.argmax(axis=-1)
+        rng_key, key2 = jax.random.split(rng_key)
+        action = sample_legal_action(key2, logits, state.legal_action_mask)
         state = step_fn(state, action)
         states.append(state)
 
-    pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
+    pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=.5)
 
 
 def forward_fn(x, is_eval=True):
@@ -60,6 +79,7 @@ def test_play_random_model():
     forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
     dummy_state = jax.vmap(env.init)(jax.random.split(jax.random.PRNGKey(1), 2))
     dummy_input = dummy_state.observation
+    # is_eval needs to be False for BatchNorm to initialize
     model = forward.init(jax.random.PRNGKey(0), dummy_input, is_eval=False)  # (params, state)
 
     def apply(obs):

@@ -25,6 +25,8 @@ def make_baseline_model(model_id: BaselineModelId, download_dir: str = "baseline
     if model_id in (
         "animal_shogi_v0",
         "gardner_chess_v0",
+        "go_5x5_v0",
+        "go_5x5C2",
         "go_9x9_v0",
         "hex_v0",
         "othello_v0",
@@ -45,7 +47,14 @@ def make_baseline_model(model_id: BaselineModelId, download_dir: str = "baseline
 def _make_az_baseline_model(model_id: BaselineModelId, download_dir: str = "baselines"):
     import haiku as hk
 
-    model_args, model_params, model_state = _load_baseline_model(model_id, download_dir)
+    if model_id.startswith('go_5x5'):
+        local_fname = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722023807/000005.ckpt'
+        print(f'loading baseline {model_id} from {local_fname}')
+        config, model_params, model_state = _load_checkpoint(f'{local_fname}')
+        model_args = {'num_actions': 26, 'num_channels': config.num_channels,
+                      'num_layers': config.num_layers, 'resnet_v2': config.resnet_v2}
+    else:
+        model_args, model_params, model_state = _load_baseline_model(model_id, download_dir)
 
     def forward_fn(x, is_eval=False):
         net = _create_az_model_v0(**model_args)
@@ -114,6 +123,13 @@ def _make_minatar_baseline_model(model_id: BaselineModelId, download_dir: str = 
     return apply
 
 
+def _load_checkpoint(filename: str):
+    with open(filename, "rb") as f:
+        d = pickle.load(f)
+    params, state = d["model"]
+    return d["config"], params, state
+
+
 def _load_baseline_model(baseline_model: BaselineModelId, basedir: str = "baselines"):
     os.makedirs(basedir, exist_ok=True)
 
@@ -123,11 +139,8 @@ def _load_baseline_model(baseline_model: BaselineModelId, basedir: str = "baseli
         url = _get_download_url(baseline_model)
         _download(url, filename)
 
-    with open(filename, "rb") as f:
-        d = pickle.load(f)
-
-    return d["args"], d["params"], d["state"]
-
+    args, params, state = _load_checkpoint(filename)
+    return args, params, state
 
 def _get_download_url(baseline_model: BaselineModelId) -> str:
     urls = {

@@ -27,36 +27,14 @@ import optax
 import pgx
 import wandb
 from omegaconf import OmegaConf
+
+from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
-from pydantic import BaseModel
 
 from network import AZNet
 
 devices = jax.local_devices()
 num_devices = len(devices)
-
-
-class Config(BaseModel):
-    env_id: pgx.EnvId = "go_5x5"
-    seed: int = 0
-    max_num_iters: int = 400
-    # network params
-    num_channels: int = 128
-    num_layers: int = 6
-    resnet_v2: bool = True
-    # selfplay params
-    selfplay_batch_size: int = 1024   # #games
-    num_simulations: int = 32
-    max_num_steps: int = 256  # max_num_moves per game
-    # training params
-    training_batch_size: int = 4096   # #samples per batch
-    learning_rate: float = 0.001
-    # eval params
-    eval_interval: int = 5
-    checkpoint_interval: int = 5
-
-    class Config:
-        extra = "forbid"
 
 
 conf_dict = OmegaConf.from_cli()
@@ -235,7 +213,7 @@ def evaluate(rng_key, my_model):
     my_model_params, my_model_state = my_model
 
     key, subkey = jax.random.split(rng_key)
-    batch_size = config.selfplay_batch_size // num_devices
+    batch_size = config.eval_batch_size // num_devices
     keys = jax.random.split(subkey, batch_size)
     state = jax.vmap(env.init)(keys)
 
@@ -284,7 +262,7 @@ def main():
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
-        if iteration % config.eval_interval == 0:
+        if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
             keys = jax.random.split(subkey, num_devices)
