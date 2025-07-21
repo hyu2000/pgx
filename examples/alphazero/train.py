@@ -42,7 +42,8 @@ config: Config = Config(**conf_dict)
 print(config)
 
 env = pgx.make(config.env_id)
-baseline = pgx.make_baseline_model(config.env_id + "_v0")
+baseline = pgx.make_baseline_model(config.env_id + "_v0",
+                                   download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722023807/000005.ckpt')
 
 
 def forward_fn(x, is_eval=False):
@@ -279,7 +280,7 @@ def main():
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
             model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (model, opt_state))
-            print(f'checkpointing to {ckpt_dir}')
+            print(f'checkpointing to {ckpt_dir}/{iteration}')
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
                     "config": config,

@@ -35,3 +35,19 @@ def test_observation():
     obs = game.observe(state1)
     obs0 = game.observe(state1, color=0)
     assert (obs != obs0).any()
+    print(obs.dtype)
+
+
+def test_history():
+    game = Game(5, 0.5)
+    state0 = game.init()
+    assert(state0.board_history.shape == (8, 25))
+    assert((state0.board_history == 2).all())
+    state1 = game.step(state0, 1)
+    assert(state1.board_history.shape == (8, 25))
+    assert((state1.board_history[1:] == 2).all())
+    print(state1.board_history[0].reshape((5, 5)))
+
+    state2 = game.step(state1, 2)
+    assert((state2.board_history[1] == state1.board_history[0]).all())
+    print(state2.board_history[0].reshape((5, 5)))

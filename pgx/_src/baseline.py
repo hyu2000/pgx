@@ -48,7 +48,7 @@ def _make_az_baseline_model(model_id: BaselineModelId, download_dir: str = "base
     import haiku as hk
 
     if model_id.startswith('go_5x5'):
-        local_fname = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722023807/000005.ckpt'
+        local_fname = download_dir
         print(f'loading baseline {model_id} from {local_fname}')
         config, model_params, model_state = _load_checkpoint(f'{local_fname}')
         model_args = {'num_actions': 26, 'num_channels': config.num_channels,

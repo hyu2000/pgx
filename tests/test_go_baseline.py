@@ -24,29 +24,35 @@ def test_load_checkpoint():
 
 
 def sample_legal_action(rng_key, logits, legal_mask):
+    """ as logits get sharper, there are less diversity
+    Might help to increase batch-size
+    """
     masked_logits = jnp.where(legal_mask, logits, -jnp.inf)
     return jax.random.categorical(rng_key, logits=masked_logits, axis=-1)
 
 
 def test_run_game():
-    """ runs on jax cpu! jax-metal 0.1.1 erred out """
+    """ runs on jax cpu! jax-metal 0.1.1 erred out
+    """
     env_id = "go_5x5"
     model_id = f"{env_id}_v0"
     rng_key = jax.random.PRNGKey(1)
 
     env = pgx.make(env_id)
     # model is a function: model(state.observation)
-    model = pgx.make_baseline_model(model_id)
+    model = pgx.make_baseline_model(model_id,
+                                    download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722031225/000025.ckpt')
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
 
     states = []
-    batch_size = 1
+    batch_size = 10
     rng_key, key2 = jax.random.split(rng_key)
     keys = jax.random.split(key2, batch_size)
     state = init_fn(keys)
     states.append(state)
+    assert len(state.observation) == batch_size
     while not (state.terminated | state.truncated).all():
         logits, value = model(state.observation)
         # action = logits.argmax(axis=-1)

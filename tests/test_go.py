@@ -84,6 +84,52 @@ def test_go5C2():
     state0 = env.init(key=key)
     state1 = env.step(state0, 17)
     _show(state1)
+    print(state1.observation.shape)
+    obs1 = state1.observation.astype(jnp.int8)
+    # obs1 = jnp.moveaxis(obs1, -1, 0)
+    print(obs1[:, :, -1])  # white to move
+    print(obs1[:, :, 0])   # current board, my color (white)
+    print(obs1[:, :, 1])   # current board, opp color (black)
+    assert(state1._step_count == 1)
+
+
+def test_go5C2env():
+    key = jax.random.PRNGKey(0)
+
+    env = Go(size=5, komi=0.5, open_move=17)
+    state0 = env.init(key=key)
+    _show(state0)
+    obs0 = state0.observation.astype(jnp.int8)
+    print(obs0[:, :, -1])
+    print(obs0[:, :,  0])
+    print(obs0[:, :,  1])
+    state1 = env.step(state0, 12)  # C3
+    _show(state1)
+    assert(state1._step_count == 1)
+    obs1 = state1.observation.astype(jnp.int8)
+    print(obs1.shape, obs1.dtype)
+    print(obs1[:, :, -1])  # black to move
+    print(obs1[:, :, 0])   # black's stones
+    print(obs1[:, :, 1])   # white's stones
+
+
+def test_C2jit():
+    """ see if go5C2 env is safe under jit """
+    key = jax.random.PRNGKey(0)
+
+    env = Go(size=5, komi=0.5, open_move=17)
+    init = jax.jit(env.init)
+    step = jax.jit(env.step)
+
+    state0 = init(key=key)
+    _show(state0)
+    state1 = step(state0, 12)
+    _show(state1)
+    obs1 = state1.observation.astype(jnp.int8)
+    print(obs1.shape, obs1.dtype)
+    print(obs1[:, :, -1])  # black to move
+    print(obs1[:, :, 0])   # black's stones
+    print(obs1[:, :, 1])   # white's stones
 
 
 def test_end_by_pass():
