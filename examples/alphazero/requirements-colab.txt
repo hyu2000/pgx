@@ -1,7 +1,10 @@
-jax
+typing_extensions>=4.2.0
+jax[cuda]
 dm-haiku
+flax
 mctx
 optax
 wandb
 omegaconf
 pydantic
+svgwrite

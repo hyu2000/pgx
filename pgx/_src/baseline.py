@@ -26,7 +26,7 @@ def make_baseline_model(model_id: BaselineModelId, download_dir: str = "baseline
         "animal_shogi_v0",
         "gardner_chess_v0",
         "go_5x5_v0",
-        "go_5x5C2",
+        "go_5x5C2_v0",
         "go_9x9_v0",
         "hex_v0",
         "othello_v0",

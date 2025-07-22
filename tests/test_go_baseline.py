@@ -34,14 +34,14 @@ def sample_legal_action(rng_key, logits, legal_mask):
 def test_run_game():
     """ runs on jax cpu! jax-metal 0.1.1 erred out
     """
-    env_id = "go_5x5"
+    env_id = "go_5x5C2"
     model_id = f"{env_id}_v0"
     rng_key = jax.random.PRNGKey(1)
 
     env = pgx.make(env_id)
     # model is a function: model(state.observation)
     model = pgx.make_baseline_model(model_id,
-                                    download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722031225/000025.ckpt')
+                                    download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722113749/000100.ckpt')
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
@@ -61,7 +61,7 @@ def test_run_game():
         state = step_fn(state, action)
         states.append(state)
 
-    pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=.5)
+    pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
 
 
 def forward_fn(x, is_eval=True):
