@@ -18,6 +18,7 @@ import pickle
 import time
 from functools import partial
 from typing import NamedTuple
+import platform
 
 import haiku as hk
 import jax
@@ -42,8 +43,11 @@ config: Config = Config(**conf_dict)
 print(config)
 
 env = pgx.make(config.env_id)
-baseline = pgx.make_baseline_model(config.env_id + "_v0",
-                                   download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722023807/000005.ckpt')
+
+CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+assert(os.path.isdir(CHECKPOINT_DIR))
+baseline_id = 'go_5x5_20250722113749/000100.ckpt'
+baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
 
 def forward_fn(x, is_eval=False):
@@ -250,9 +254,9 @@ def main():
     model, opt_state = jax.device_put_replicated((model, opt_state), devices)
 
     # Prepare checkpoint dir
-    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
-    now = now.strftime("%Y%m%d%H%M%S")
-    ckpt_dir = os.path.join("checkpoints", f"{config.env_id}_{now}")
+    now = datetime.datetime.now()
+    now = now.strftime("%y%m%d-%H%M%S")
+    ckpt_dir = os.path.join(CHECKPOINT_DIR, f"{config.env_id}_{now}")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Initialize logging dict
