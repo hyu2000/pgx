@@ -15,6 +15,8 @@
 import datetime
 import os
 import pickle
+from zoneinfo import ZoneInfo
+
 import time
 from functools import partial
 from typing import NamedTuple
@@ -37,7 +39,7 @@ from network import AZNet
 devices = jax.local_devices()
 num_devices = len(devices)
 
-
+# python train.py env_id=go_5x5C2 max_num_iters=200
 conf_dict = OmegaConf.from_cli()
 config: Config = Config(**conf_dict)
 print(config)
@@ -46,7 +48,7 @@ env = pgx.make(config.env_id)
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-baseline_id = 'go_5x5_20250722113749/000100.ckpt'
+baseline_id = 'go_5x5_250722-113749/000100'
 baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
 
@@ -254,7 +256,7 @@ def main():
     model, opt_state = jax.device_put_replicated((model, opt_state), devices)
 
     # Prepare checkpoint dir
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(tz=ZoneInfo("America/New_York"))
     now = now.strftime("%y%m%d-%H%M%S")
     ckpt_dir = os.path.join(CHECKPOINT_DIR, f"{config.env_id}_{now}")
     os.makedirs(ckpt_dir, exist_ok=True)
