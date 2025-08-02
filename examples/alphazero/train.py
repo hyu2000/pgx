@@ -285,7 +285,8 @@ def main():
     iteration: int = 0
     hours: float = 0.0
     frames: int = 0
-    log = {"iteration": iteration, "hours": hours, "frames": frames}
+    steps: int = 0
+    log = {"iteration": iteration, "hours": hours, "frames": frames, "steps": steps}
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
@@ -352,6 +353,7 @@ def main():
         num_samples_rounded = num_updates * config.training_batch_size
         print(f'masking: {mask.shape=} {frames_cur_iter} -> {samples.obs.shape[0]}, rounded -> {num_samples_rounded}')
         frames += samples.obs.shape[0]
+        steps += num_updates
         minibatches = jax.tree_util.tree_map(
             lambda x: x[:num_samples_rounded].reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
         )
@@ -374,6 +376,7 @@ def main():
                 "train/value_loss": value_loss,
                 "hours": hours,
                 "frames": frames,
+                "steps": steps
             }
         )
 
