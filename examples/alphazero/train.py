@@ -48,7 +48,7 @@ env = pgx.make(config.env_id)
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-baseline_id = 'go_5x5_250722-113749/000100'
+baseline_id = 'go_5x5C2_250722-193343/000200'
 baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
 
@@ -64,7 +64,24 @@ def forward_fn(x, is_eval=False):
 
 
 forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
-optimizer = optax.adam(learning_rate=config.learning_rate)
+
+
+# def lr_schedule(step):
+#     e = jnp.floor(step * 1.0 / config.lr_decay_steps)
+#     return config.learning_rate * jnp.exp2(-e)
+
+lr_schedule = optax.exponential_decay(
+    init_value=config.learning_rate,
+    transition_steps=config.lr_decay_steps,
+    decay_rate=0.5,  # This gives you the same 2^(-e) behavior
+    staircase=True   # This gives you the floor behavior
+)
+
+#optimizer = optax.adam(learning_rate=config.learning_rate)
+optimizer = optax.chain(
+    optax.add_decayed_weights(config.weight_decay),
+    optax.sgd(lr_schedule, momentum=0.9),
+)
 
 
 def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
@@ -109,6 +126,8 @@ def selfplay(model, rng_key: jnp.ndarray) -> SelfplayOutput:
     batch_size = config.selfplay_batch_size // num_devices
 
     def step_fn(state, key) -> SelfplayOutput:
+        """ state: simultaneous games (batch_size)
+        """
         key1, key2 = jax.random.split(key)
         observation = state.observation
 
@@ -133,9 +152,9 @@ def selfplay(model, rng_key: jnp.ndarray) -> SelfplayOutput:
         discount = -1.0 * jnp.ones_like(value)
         discount = jnp.where(state.terminated, 0.0, discount)
         return state, SelfplayOutput(
-            obs=observation,
+            obs=observation,   # obs is from the perspective of current player too
             action_weights=policy_output.action_weights,
-            reward=state.rewards[jnp.arange(state.rewards.shape[0]), actor],
+            reward=state.rewards[jnp.arange(state.rewards.shape[0]), actor],  # reward from the perspective of current player
             terminated=state.terminated,
             discount=discount,
         )
@@ -147,7 +166,7 @@ def selfplay(model, rng_key: jnp.ndarray) -> SelfplayOutput:
     key_seq = jax.random.split(rng_key, config.max_num_steps)
     _, data = jax.lax.scan(step_fn, state, key_seq)
 
-    return data
+    return data  # data.[field]: (time, batch, ...)
 
 
 class Sample(NamedTuple):
@@ -161,7 +180,8 @@ class Sample(NamedTuple):
 def compute_loss_input(data: SelfplayOutput) -> Sample:
     batch_size = config.selfplay_batch_size // num_devices
     # If episode is truncated, there is no value target
-    # So when we compute value loss, we need to mask it
+    # only 1 state is marked as terminated. later states are reset
+    # So when we compute value loss, we need to mask it (value_mask = 0 means not using it)
     value_mask = jnp.cumsum(data.terminated[::-1, :], axis=0)[::-1, :] >= 1
 
     # Compute value target
@@ -206,7 +226,7 @@ def train(model, opt_state, data: Sample):
         model_params, model_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
-    updates, opt_state = optimizer.update(grads, opt_state)
+    updates, opt_state = optimizer.update(grads, opt_state, model_params)
     model_params = optax.apply_updates(model_params, updates)
     model = (model_params, model_state)
     return model, opt_state, policy_loss, value_loss
@@ -320,14 +340,20 @@ def main():
 
         # Shuffle samples and make minibatches
         samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
-        frames += samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
+        frames_cur_iter = samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
         samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[3:])), samples)
+        # Filter out states after terminal state here. For now just all samples w/o value
+        mask = samples.mask
+        samples = jax.tree_util.tree_map(lambda x: x[mask], samples)
         rng_key, subkey = jax.random.split(rng_key)
         ixs = jax.random.permutation(subkey, jnp.arange(samples.obs.shape[0]))
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
         num_updates = samples.obs.shape[0] // config.training_batch_size
+        num_samples_rounded = num_updates * config.training_batch_size
+        print(f'masking: {mask.shape=} {frames_cur_iter} -> {samples.obs.shape[0]}, rounded -> {num_samples_rounded}')
+        frames += samples.obs.shape[0]
         minibatches = jax.tree_util.tree_map(
-            lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
+            lambda x: x[:num_samples_rounded].reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
         )
 
         # Training
