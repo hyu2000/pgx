@@ -9,6 +9,7 @@ import haiku as hk
 
 from examples.alphazero.network import AZNet
 from examples.alphazero import mctx_search
+from pgx._src.baseline import init_az_random_model
 
 #from IPython.display import *
 
@@ -83,7 +84,9 @@ def test_run_game_raw_policy():
     rng_key = jax.random.PRNGKey(1)
 
     env = pgx.make(env_id)
+    rng_key, key2 = jax.random.split(rng_key)
     model = load_go5_checkpoint()
+    # model = init_az_random_model(env, key2)
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))

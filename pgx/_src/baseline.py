@@ -45,8 +45,7 @@ def make_baseline_model(model_id: BaselineModelId, download_dir: str = "baseline
         assert False
 
 
-def init_az_random_model(model_id: BaselineModelId):
-    # untested
+def init_az_random_model(env, rng_key):
     import haiku as hk
 
     def forward_fn(x, is_eval=False):
@@ -60,7 +59,11 @@ def init_az_random_model(model_id: BaselineModelId):
         return policy_out, value_out
 
     forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
-    model_params, model_state = forward.init()
+    rng_key, key1 = jax.random.split(rng_key, 2)
+    dummy_state = jax.vmap(env.init)(jax.random.split(key1, 2))
+    dummy_input = dummy_state.observation
+    # somehow haiku needs dummy input to init the model
+    model_params, model_state = forward.init(rng_key, dummy_input)
 
     def apply(obs):
         (logits, value), _ = forward.apply(model_params, model_state, obs, is_eval=True)
