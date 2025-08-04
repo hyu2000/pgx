@@ -1,4 +1,5 @@
 import pickle
+import platform
 
 import jax
 import jax.numpy as jnp
@@ -7,7 +8,7 @@ import pgx
 import haiku as hk
 
 from examples.alphazero.network import AZNet
-from examples.alphazero.config import Config
+from examples.alphazero import mctx_search
 
 #from IPython.display import *
 
@@ -31,23 +32,64 @@ def sample_legal_action(rng_key, logits, legal_mask):
     return jax.random.categorical(rng_key, logits=masked_logits, axis=-1)
 
 
-def test_run_game():
+def load_go5_checkpoint():
+    env_id = "go_5x5C2"
+    model_id = f"{env_id}_v0"
+    # model is a function: model(state.observation)
+    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+    model = pgx.make_baseline_model(model_id,
+                                    download_dir=f'{CHECKPOINT_DIR}/go_5x5C2_250722-193343/000200.ckpt')
+    # model is apply(model_params)
+    return model
+
+
+def test_run_game_mctx():
+    env_id = "go_5x5C2"
+    rng_key = jax.random.PRNGKey(1)
+    env = pgx.make(env_id)
+
+    from pgx._src.baseline import load_baseline_model
+    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250722-193343/000200.ckpt'
+    model_apply, model_param, model_state = load_baseline_model(fpath)
+    model = (model_param, model_state)
+
+    init_fn = jax.jit(jax.vmap(env.init))
+    step_fn = jax.jit(jax.vmap(env.step))
+    recur_fn = mctx_search.make_recurrent_fn(model_apply, env.step)
+
+    states = []
+    batch_size = 10
+    rng_key, key2 = jax.random.split(rng_key)
+    keys = jax.random.split(key2, batch_size)
+    state = init_fn(keys)
+    states.append(state)
+    assert len(state.observation) == batch_size
+    while not (state.terminated | state.truncated).all():
+        # logits, value = model_apply(state.observation)
+        rng_key, key2 = jax.random.split(rng_key)
+        policy_output = mctx_search.improve_policy_with_mcts(model_apply, recur_fn, model, state, key2, num_simulations=2)
+        action = policy_output.action
+        state = step_fn(state, action)
+        states.append(state)
+
+    pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
+
+
+def test_run_game_raw_policy():
     """ runs on jax cpu! jax-metal 0.1.1 erred out
     """
     env_id = "go_5x5C2"
-    model_id = f"{env_id}_v0"
     rng_key = jax.random.PRNGKey(1)
 
     env = pgx.make(env_id)
-    # model is a function: model(state.observation)
-    model = pgx.make_baseline_model(model_id,
-                                    download_dir='/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints/go_5x5_20250722113749/000100.ckpt')
+    model = load_go5_checkpoint()
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
 
     states = []
-    batch_size = 10
+    batch_size = 2
     rng_key, key2 = jax.random.split(rng_key)
     keys = jax.random.split(key2, batch_size)
     state = init_fn(keys)

@@ -1,4 +1,6 @@
 """ encapsulate mctx """
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import mctx
@@ -6,7 +8,7 @@ import pgx
 
 
 def make_recurrent_fn(forward_apply, env_step):
-    """ forward_apply is not bound w/ params
+    """ forward_apply is bound w/ params:   partial(forward_apply, model_params, model_state, is_eval=True)(x)
     """
 
     def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
@@ -43,6 +45,7 @@ def make_recurrent_fn(forward_apply, env_step):
     return recurrent_fn
 
 
+@partial(jax.jit, static_argnums=[0, 1, 5])
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
     model_params, model_state = model
     (logits, value), _ = forward_apply(

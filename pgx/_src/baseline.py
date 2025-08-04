@@ -1,9 +1,10 @@
 import os
 import pickle
-from typing import Literal
+from typing import Literal, Any
 
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 
 from pgx._src.utils import _download
 
@@ -44,7 +45,77 @@ def make_baseline_model(model_id: BaselineModelId, download_dir: str = "baseline
         assert False
 
 
+def init_az_random_model(model_id: BaselineModelId):
+    # untested
+    import haiku as hk
+
+    def forward_fn(x, is_eval=False):
+        net = _create_az_model_v0(
+            num_actions=26,
+            num_channels=4,
+            num_layers=6,
+            resnet_v2=True,
+        )
+        policy_out, value_out = net(x, is_training=not is_eval, test_local_stats=False)
+        return policy_out, value_out
+
+    forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
+    model_params, model_state = forward.init()
+
+    def apply(obs):
+        (logits, value), _ = forward.apply(model_params, model_state, obs, is_eval=True)
+        return logits, value
+
+    return apply
+
+
+class ModelEqx(eqx.Module):
+    """ wrap model """
+    model_params: Any
+    model_state: Any
+
+    def __init__(self, fpath):
+        config, model_params, model_state = _load_checkpoint(f'{fpath}')
+        model_args = {'num_actions': 26, 'num_channels': config.num_channels,
+                      'num_layers': config.num_layers, 'resnet_v2': config.resnet_v2}
+
+        self.net = _create_az_model_v0(**model_args)
+        self.model_params = model_params
+        self.model_state = model_state
+
+    def __call__(self, x):
+        return self.net(x, is_training=False, test_local_stats=False)
+
+
+def load_baseline_model(fpath: str, is_eval: bool = True):
+    """ return everything: forward_apply(param, state, ...), param, state """
+    import haiku as hk
+
+    print(f'loading baseline from {fpath}')
+    config, model_params, model_state = _load_checkpoint(f'{fpath}')
+    model_args = {'num_actions': 26, 'num_channels': config.num_channels,
+                  'num_layers': config.num_layers, 'resnet_v2': config.resnet_v2}
+
+    def forward_fn(x, is_eval=is_eval):
+        net = _create_az_model_v0(**model_args)  # Todo
+        policy_out, value_out = net(x, is_training=not is_eval, test_local_stats=False)
+        return policy_out, value_out
+
+    forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
+
+    # def apply(obs):
+    #     (logits, value), _ = forward.apply(model_params, model_state, obs, is_eval=True)
+    #     return logits, value
+
+    return forward.apply, model_params, model_state
+
+
 def _make_az_baseline_model(model_id: BaselineModelId, download_dir: str = "baselines"):
+    """ functional: returns a pure function (partial w/ params):
+        apply(obs) -> logits, value
+    - eval-mode only.
+    - params not exposed, cannot be updated
+    """
     import haiku as hk
 
     if model_id.startswith('go_5x5'):
