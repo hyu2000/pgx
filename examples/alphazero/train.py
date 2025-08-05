@@ -32,6 +32,7 @@ import wandb
 from omegaconf import OmegaConf
 
 from examples.alphazero.config import Config
+from examples.alphazero.mctx_search import make_recurrent_fn
 from pgx.experimental import auto_reset
 
 from network import AZNet
@@ -84,6 +85,7 @@ optimizer = optax.chain(
 )
 
 
+"""
 def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
     # model: params
     # state: embedding
@@ -110,6 +112,8 @@ def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.St
         value=value,
     )
     return recurrent_fn_output, state
+"""
+recurrent_fn = make_recurrent_fn(forward.apply, env.step)
 
 
 class SelfplayOutput(NamedTuple):
@@ -143,7 +147,7 @@ def selfplay(model, rng_key: jnp.ndarray) -> SelfplayOutput:
             recurrent_fn=recurrent_fn,
             num_simulations=config.num_simulations,
             invalid_actions=~state.legal_action_mask,
-            qtransform=mctx.qtransform_completed_by_mix_value,
+            qtransform=partial(mctx.qtransform_completed_by_mix_value, rescale_values=False),
             gumbel_scale=1.0,
         )
         actor = state.current_player

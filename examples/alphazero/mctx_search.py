@@ -8,7 +8,7 @@ import pgx
 
 
 def make_recurrent_fn(forward_apply, env_step):
-    """ forward_apply is bound w/ params:   partial(forward_apply, model_params, model_state, is_eval=True)(x)
+    """ forward_apply:   forward_apply(model_params, model_state, obs, is_eval=True)
     """
 
     def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
@@ -46,6 +46,8 @@ def make_recurrent_fn(forward_apply, env_step):
 
 
 @partial(jax.jit, static_argnums=[0, 1, 5])
+# if we jit this func, num_simulation needs to be marked as static. If instead we want to jit its callers,
+# how do we mark this static_arg? In a big project, there are lots of args sprinkled around that are configs
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
     model_params, model_state = model
     (logits, value), _ = forward_apply(
@@ -60,7 +62,10 @@ def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key,
         recurrent_fn=recurrent_fn,
         num_simulations=num_simulations,
         invalid_actions=~state.legal_action_mask,
-        qtransform=mctx.qtransform_completed_by_mix_value,
+        qtransform=partial(
+            mctx.qtransform_completed_by_mix_value,
+            rescale_values=False),
+        max_num_considered_actions=16,  # default=16
         gumbel_scale=1.0,
     )
     return policy_output

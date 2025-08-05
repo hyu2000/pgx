@@ -116,7 +116,7 @@ class Game:
         return two_consecutive_pass | state.is_psk | timeover
 
     def rewards(self, state: GameState) -> Array:
-        """ rewards for [black, white]. Only awarded when game is over """
+        """ rewards for [black, white], either [1, -1] or [-1, 1]. Only awarded when game is over """
         scores = _count_scores(state, self.size)
         is_black_win = scores[0] - self.komi > scores[1]
         rewards = lax.select(is_black_win, jnp.float32([1, -1]), jnp.float32([-1, 1]))

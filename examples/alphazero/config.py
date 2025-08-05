@@ -17,7 +17,7 @@ class Config(BaseModel):
     # training params
     training_batch_size: int = 4096   # #samples per batch
     learning_rate: float = 0.001
-    lr_decay_steps: int = 4096  # halve LR every #steps
+    lr_decay_steps: int = 256  # halve LR every #steps
     weight_decay: float = 1e-4
     # eval params
     eval_interval: int = 5
