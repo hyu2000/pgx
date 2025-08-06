@@ -35,15 +35,21 @@ observe = jax.jit(env.observe)
 
 
 def test_init():
-    """ game can start with either player 0 or 1 (randomized) """
-    for i in range(10):
-        key = jax.random.PRNGKey(i)
-        state = init(key=key)
-        # underlying game color: 0 == black
-        assert state._x.color == 0
-        print(f'iter {i} {state._step_count} {state.current_player}')
-        if state.current_player == 1:
-            continue
+    key = jax.random.PRNGKey(0)
+    state = init(key=key)
+    assert state.current_player == 0
+    print(state.rewards)
+
+
+def test_batch_init():
+    """ game can start with either player 0 or 1 (randomized), as black """
+    init = jax.jit(jax.vmap(env.init))
+    # keys = jnp.array([jax.random.PRNGKey(i) for i in range(10)])
+    keys = jax.random.split(jax.random.PRNGKey(0), 10)
+    states = init(keys)
+    print(type(states))  # dataclass, pytree
+    print(states._x.color)
+    print(states.current_player)
 
 
 def test_no_jit():
@@ -113,6 +119,32 @@ def test_go5C2env():
     print(obs1[:, :, 1])   # white's stones
 
 
+def test_go5C2env_reward():
+    """ make sure the right player wins the game """
+    key = jax.random.PRNGKey(0)
+    env = Go(size=5, komi=0.5, open_move=17)
+    init = jax.jit(jax.vmap(env.init))
+    step = jax.jit(jax.vmap(env.step))
+
+    keys = jax.random.split(key, 2)
+    states0 = init(keys)
+    print('white to move, player_id = ', states0.current_player)
+
+    states = states0
+    states = step(state=states, action=jnp.array([0, 0]))
+
+    passes = jnp.array([25, 25])
+    states = step(state=states, action=passes)
+    states = step(state=states, action=passes)
+    print(states.terminated)
+    print('white reward', states.rewards[jnp.arange(2), states0.current_player])
+
+    # after terminal state, terminated == False
+    states = step(state=states, action=passes)
+    print('pass end-game, terminated=', states.terminated)
+    print(states.rewards)
+
+
 def test_C2jit():
     """ see if go5C2 env is safe under jit """
     key = jax.random.PRNGKey(0)
@@ -136,6 +168,7 @@ def test_end_by_pass():
     key = jax.random.PRNGKey(0)
 
     state = init(key=key)
+    print('game started with player', state.current_player)
     state = step(state=state, action=25)
     assert state._x.consecutive_pass_count == 1
     assert not state.terminated
@@ -145,9 +178,17 @@ def test_end_by_pass():
     state = step(state=state, action=25)
     assert state._x.consecutive_pass_count == 1
     assert not state.terminated
+    assert (state.rewards == 0).all()
     state = step(state=state, action=25)
     assert state._x.consecutive_pass_count == 2
     assert state.terminated
+    _show(state)
+    print(state.current_player, state.rewards)
+    assert (state.rewards != 0).all()
+
+    pstate = step(state=state, action=5)
+    _show(pstate)
+    assert pstate.terminated
 
 
 def test_step():
@@ -156,7 +197,8 @@ def test_step():
     """
     key = jax.random.PRNGKey(1)
     state = init(key=key)
-    assert state.current_player == 1
+    assert state.current_player == 1  # player 1 to start, i.e. player1 == black here
+    assert all(state._player_order == jnp.array([1, 0]))
 
     state = step(state=state, action=12)  # BLACK
     state = step(state=state, action=11)  # WHITE
@@ -179,6 +221,7 @@ def test_step():
     state = step(state=state, action=19)
     state = step(state=state, action=21)
     state = step(state=state, action=25)  # pass
+    pstate = state
     state = step(state=state, action=25)  # pass
 
     expected_board: jnp.ndarray = jnp.array(
@@ -198,10 +241,17 @@ def test_step():
     [3] O O @ + @
     [4] O O O @ +
     """
+    assert not pstate.terminated
+    assert pstate.current_player == 0
+    # rewards is only calc'ed for terminal state
+    assert all(pstate.rewards == jnp.array([0, 0]))
+
     assert (jnp.clip(state._x.board, -1, 1) == expected_board.ravel()).all()
     assert state.terminated
 
     # 同点なのでコミの分 黒 == player_1 の負け
+    # state.rewards[i]: reward for the i-th player
+    # in this case, player 1 (black) lost, due to komi=7.5
     assert (state.rewards == jnp.array([1, -1])).all()
 
 
@@ -450,6 +500,7 @@ def test_ko():
     assert state.legal_action_mask[231]
 
 def test_observe():
+    """ observation: NHWC """
     key = jax.random.PRNGKey(0)
     state = init(key=key)
     assert state.current_player == 1

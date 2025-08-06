@@ -184,15 +184,18 @@ class Sample(NamedTuple):
 def compute_loss_input(data: SelfplayOutput) -> Sample:
     batch_size = config.selfplay_batch_size // num_devices
     # If episode is truncated, there is no value target
-    # only 1 state is marked as terminated. later states are reset
-    # So when we compute value loss, we need to mask it (value_mask = 0 means not using it)
+    # auto-reset: the next init state kept the previous terminated/truncated/rewards
+    # So when we compute value loss, we need to mask it (value_mask=0 means not using it)
     value_mask = jnp.cumsum(data.terminated[::-1, :], axis=0)[::-1, :] >= 1
 
     # Compute value target
+    # discount=-1 except 0 for terminated
+    # Be aware of off-by-1 error: rewards are stored at the next init state due to auto-reset, but next init-state shouldn't get that reward
     def body_fn(carry, i):
         ix = config.max_num_steps - i - 1
-        v = data.reward[ix] + data.discount[ix] * carry
-        return v, v
+        v = -1 * carry
+        carry = data.reward[ix] + data.discount[ix] * carry
+        return carry, v
 
     _, value_tgt = jax.lax.scan(
         body_fn,
@@ -347,19 +350,14 @@ def main():
         samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
         frames_cur_iter = samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
         samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[3:])), samples)
-        # Filter out states after terminal state here. For now just all samples w/o value
-        mask = samples.mask
-        samples = jax.tree_util.tree_map(lambda x: x[mask], samples)
         rng_key, subkey = jax.random.split(rng_key)
         ixs = jax.random.permutation(subkey, jnp.arange(samples.obs.shape[0]))
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
         num_updates = samples.obs.shape[0] // config.training_batch_size
-        num_samples_rounded = num_updates * config.training_batch_size
-        print(f'masking: {mask.shape=} {frames_cur_iter} -> {samples.obs.shape[0]}, rounded -> {num_samples_rounded}')
-        frames += samples.obs.shape[0]
+        frames += frames_cur_iter
         steps += num_updates
         minibatches = jax.tree_util.tree_map(
-            lambda x: x[:num_samples_rounded].reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
+            lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
         )
 
         # Training

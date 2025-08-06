@@ -49,7 +49,9 @@ def auto_reset(step_fn, init_fn):
             ),
             lambda: state,
         )
+
         state = step_fn(state, action, key1)
+
         state = jax.lax.cond(
             (state.terminated | state.truncated),
             # state is replaced by initial state,
