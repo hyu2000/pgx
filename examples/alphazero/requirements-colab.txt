@@ -1,6 +1,7 @@
 typing_extensions>=4.2.0
 jax[cuda]
 dm-haiku
+equinox
 flax
 mctx
 optax
