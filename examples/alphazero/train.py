@@ -191,6 +191,7 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
     # Compute value target
     # discount=-1 except 0 for terminated
     # Be aware of off-by-1 error: rewards are stored at the next init state due to auto-reset, but next init-state shouldn't get that reward
+    # The bug affects value_tgt for init states
     def body_fn(carry, i):
         ix = config.max_num_steps - i - 1
         v = -1 * carry
@@ -292,8 +293,8 @@ def main():
     iteration: int = 0
     hours: float = 0.0
     frames: int = 0
-    steps: int = 0
-    log = {"iteration": iteration, "hours": hours, "frames": frames, "steps": steps}
+    train_steps: int = 0
+    log = {"iteration": iteration, "hours": hours, "frames": frames, "train_steps": train_steps}
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
@@ -304,10 +305,10 @@ def main():
             R = evaluate(keys, model)
             log.update(
                 {
-                    f"eval/vs_baseline/avg_R": R.mean().item(),
+                    # f"eval/vs_baseline/avg_R": R.mean().item(),
                     f"eval/vs_baseline/win_rate": ((R == 1).sum() / R.size).item(),
                     f"eval/vs_baseline/draw_rate": ((R == 0).sum() / R.size).item(),
-                    f"eval/vs_baseline/lose_rate": ((R == -1).sum() / R.size).item(),
+                    # f"eval/vs_baseline/lose_rate": ((R == -1).sum() / R.size).item(),
                 }
             )
 
@@ -355,7 +356,7 @@ def main():
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
         num_updates = samples.obs.shape[0] // config.training_batch_size
         frames += frames_cur_iter
-        steps += num_updates
+        train_steps += num_updates
         minibatches = jax.tree_util.tree_map(
             lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
         )
@@ -378,7 +379,7 @@ def main():
                 "train/value_loss": value_loss,
                 "hours": hours,
                 "frames": frames,
-                "steps": steps
+                "train_steps": train_steps
             }
         )
 
