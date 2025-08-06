@@ -67,22 +67,22 @@ def forward_fn(x, is_eval=False):
 forward = hk.without_apply_rng(hk.transform_with_state(forward_fn))
 
 
-# def lr_schedule(step):
-#     e = jnp.floor(step * 1.0 / config.lr_decay_steps)
-#     return config.learning_rate * jnp.exp2(-e)
-
 lr_schedule = optax.exponential_decay(
     init_value=config.learning_rate,
     transition_steps=config.lr_decay_steps,
     decay_rate=0.5,  # This gives you the same 2^(-e) behavior
     staircase=True   # This gives you the floor behavior
 )
-
-#optimizer = optax.adam(learning_rate=config.learning_rate)
-optimizer = optax.chain(
-    optax.add_decayed_weights(config.weight_decay),
-    optax.sgd(lr_schedule, momentum=0.9),
+lr_schedule = optax.cosine_decay_schedule(
+    config.learning_rate,
+    decay_steps=config.lr_decay_steps,
+    alpha=0.2
 )
+optimizer = optax.adam(lr_schedule)
+# optimizer = optax.chain(
+#     optax.add_decayed_weights(config.weight_decay),
+#     optax.sgd(lr_schedule, momentum=0.9),
+# )
 
 
 """
