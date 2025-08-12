@@ -7,24 +7,25 @@ import mctx
 import pgx
 
 
-def make_recurrent_fn(forward_apply, env_step):
-    """ forward_apply:   forward_apply(model_params, model_state, obs, is_eval=True)
+def make_recurrent_fn(forward_fn, env_step):
+    """ forward_fn: Equinox forward function (model, bn_state, obs) -> ((logits, value), new_state)
     """
 
-    def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
+    def recurrent_fn(model_tuple, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
         """
-        seems model cannot be Any (but a0jax uses eqx.Module); state can be Any
-        state/action: array
+        Equinox-compatible recurrent function for MCTS
         """
-        # model: params
-        # state: embedding
         del rng_key
-        model_params, model_state = model
+        model, bn_state = model_tuple
 
         current_player = state.current_player
         state = jax.vmap(env_step)(state, action)
 
-        (logits, value), _ = forward_apply(model_params, model_state, state.observation, is_eval=True)
+        # Use inference mode for MCTS evaluation
+        import equinox as eqx
+        inference_model = eqx.nn.inference_mode(model)
+        (logits, value), _ = forward_fn(inference_model, bn_state, state.observation)
+        
         # mask invalid actions
         logits = logits - jnp.max(logits, axis=-1, keepdims=True)
         logits = jnp.where(state.legal_action_mask, logits, jnp.finfo(logits.dtype).min)
