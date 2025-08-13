@@ -236,12 +236,12 @@ def train(model, bn_state, opt_state, data: Sample):
         model, bn_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
-    updates, opt_state = optimizer.update(grads, opt_state, model)
-    new_trainable = optax.apply_updates(model, updates)
-    return new_trainable, bn_state, opt_state, policy_loss, value_loss
+    updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+    new_model = eqx.apply_updates(model, updates)
+    return new_model, bn_state, opt_state, policy_loss, value_loss
 
 
-@jax.pmap
+@eqx.filter_pmap
 def evaluate(rng_key, my_model, my_bn_state):
     """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
