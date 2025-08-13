@@ -127,10 +127,10 @@ class SelfplayOutput(NamedTuple):
     discount: jnp.ndarray
 
 
-@jax.pmap
-def selfplay(trainable_params, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
+@eqx.filter_pmap
+def selfplay(model, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
     # Reconstruct full model from trainable and non-trainable parts
-    model = eqx.combine(trainable_params, non_trainable_model)
+    # model = eqx.combine(trainable_params, non_trainable_model)
     batch_size = config.selfplay_batch_size // num_devices
 
     def step_fn(state, key) -> SelfplayOutput:
@@ -229,27 +229,21 @@ def loss_fn(model, bn_state, samples: Sample):
     return policy_loss + value_loss, (policy_loss, value_loss)
 
 
-@partial(jax.pmap, axis_name="i")
-def train(trainable_params, bn_state, opt_state, data: Sample):
-    # Define loss function for trainable params only
-    def loss_with_trainable(params, bn_state, data):
-        full_model = eqx.combine(params, non_trainable_model)
-        return loss_fn(full_model, bn_state, data)
-    
-    grads, (policy_loss, value_loss) = jax.grad(loss_with_trainable, has_aux=True)(
-        trainable_params, bn_state, data
+@partial(eqx.filter_pmap, axis_name="i")
+def train(model, bn_state, opt_state, data: Sample):
+
+    grads, (policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
+        model, bn_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
-    updates, opt_state = optimizer.update(grads, opt_state, trainable_params)
-    new_trainable = optax.apply_updates(trainable_params, updates)
+    updates, opt_state = optimizer.update(grads, opt_state, model)
+    new_trainable = optax.apply_updates(model, updates)
     return new_trainable, bn_state, opt_state, policy_loss, value_loss
 
 
 @jax.pmap
-def evaluate(rng_key, my_trainable, my_bn_state):
-    # Reconstruct full model
-    my_model = eqx.combine(my_trainable, non_trainable_model)
-    """A simplified evaluation by sampling. Only for debugging. 
+def evaluate(rng_key, my_model, my_bn_state):
+    """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
     my_player = 0
 
@@ -278,8 +272,6 @@ def evaluate(rng_key, my_trainable, my_bn_state):
 
 
 def main():
-    global non_trainable_model  # Make it global so functions can access it
-    
     wandb.init(project="pgx-az", config=config.model_dump())
 
     # Initialize model and opt_state
@@ -291,21 +283,16 @@ def main():
     # Create Equinox model with proper state handling
     model_key = jax.random.PRNGKey(0)
     model, bn_state = eqx.nn.make_with_state(create_model)(model_key, input_channels, spatial_size)
-    
-    # Test forward pass to get shapes right
-    test_output, _ = forward_fn(model, bn_state, dummy_input)
-    
+
     # For the optimizer we only need the trainable parameters (exclude axis_name strings)
-    trainable_model = eqx.filter(model, eqx.is_array)
-    opt_state = optimizer.init(trainable_model)
-    
-    # Store non-trainable parts separately (they don't need replication)
-    non_trainable_model = eqx.filter(model, lambda x: not eqx.is_array(x))
-    
+    params, static = eqx.partition(model, eqx.is_array)
+    opt_state = optimizer.init(params)
+
     # Replicate only the trainable parts, bn_state, and opt_state
-    trainable_replicated, bn_state, opt_state = jax.device_put_replicated(
-        (trainable_model, bn_state, opt_state), devices
+    params_replicated, bn_state, opt_state = jax.device_put_replicated(
+        (params, bn_state, opt_state), devices
     )
+    model_replicated = eqx.combine(params_replicated, static)
     
     # Store the trainable and non-trainable parts for use in functions
     # We'll reconstruct the model within each pmap function
@@ -329,7 +316,7 @@ def main():
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
             keys = jax.random.split(subkey, num_devices)
-            R = evaluate(keys, trainable_replicated, bn_state)
+            R = evaluate(keys, model_replicated, bn_state)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
@@ -347,9 +334,10 @@ def main():
                 else:
                     return x
             
-            trainable_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (trainable_replicated, bn_state, opt_state))
+            # trainable_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (model_replicated, bn_state, opt_state))
+            model_0, bn_state_0, opt_state_0 = model_replicated, bn_state, opt_state
             # Reconstruct full model for checkpointing
-            model_0 = eqx.combine(trainable_0, non_trainable_model)
+            # model_0 = eqx.combine(trainable_0, non_trainable_model)
             print(f'checkpointing to {ckpt_dir}/{iteration}')
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
@@ -380,7 +368,7 @@ def main():
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         keys = jax.random.split(subkey, num_devices)
-        data: SelfplayOutput = selfplay(trainable_replicated, bn_state, keys)
+        data: SelfplayOutput = selfplay(model_replicated, bn_state, keys)
         samples: Sample = compute_loss_input(data)
 
         # Shuffle samples and make minibatches
@@ -401,7 +389,7 @@ def main():
         policy_losses, value_losses = [], []
         for i in range(num_updates):
             minibatch: Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
-            trainable_replicated, bn_state, opt_state, policy_loss, value_loss = train(trainable_replicated, bn_state, opt_state, minibatch)
+            model_replicated, bn_state, opt_state, policy_loss, value_loss = train(model_replicated, bn_state, opt_state, minibatch)
             policy_losses.append(policy_loss.mean().item())
             value_losses.append(value_loss.mean().item())
         policy_loss = sum(policy_losses) / len(policy_losses)

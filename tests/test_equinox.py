@@ -52,6 +52,18 @@ class Multiplier(eqx.Module):
         return x * self.multiplier
 
 
+class NamedAdder(eqx.Module):
+    increment: jnp.array
+    name: str = eqx.field(static=True)
+
+    def __init__(self, increment = 1, name='unnamed'):
+        self.increment = increment
+        self.name = name
+
+    def __call__(self, x):
+        return x + self.increment
+
+
 def test_ptree():
     modela = Adder(5)
     # notice CustomNode
@@ -90,3 +102,47 @@ def test_polymorphism():
     print(evaluate(modela, jnp.arange(4)))
     assert(len(global_list) == 3)
     print(global_list)
+
+
+def test_device_put_str_fields():
+    devices = jax.local_devices()
+
+    # this won't work: x = {'name': 'x'}
+    x = {'val': jnp.arange(3)}
+    y = jax.device_put_replicated(x, devices)
+    print(y['val'].shape)
+
+    modela = NamedAdder(name='a')
+    assert modela.name == 'a'
+    print(modela.increment)
+    # modela.name marked as static
+    modely = jax.device_put_replicated(modela, devices)
+    print(modely.increment)
+    assert modely.name == modela.name
+
+
+def test_device_put_aznet():
+    from examples.alphazero.network import AZNet, BlockV2
+    nn = BlockV2(16, jax.random.PRNGKey(0))
+    nn_structure = jax.tree.structure(nn)
+    print(nn_structure)
+    # TypeError: Argument 'batch' of type <class 'str'> is not a valid JAX type
+    # why isn't BatchNorm properties static?!
+    devices = jax.local_devices()
+    params, static = eqx.partition(nn, eqx.is_array)
+    y = jax.device_put_replicated(params, devices)
+    print(y)
+    nn_device = eqx.combine(y, static)
+    print(nn_device)
+
+
+def test_device_put_bn():
+    nn = eqx.nn.BatchNorm(16, axis_name='batch')
+
+    devices = jax.local_devices()
+    params, static = eqx.partition(nn, eqx.is_array)
+    y = jax.device_put_replicated(nn, devices)
+    # assert y.axis_name is None
+    # nn_device = eqx.combine(y, static)
+    # print(nn_device)
+    assert y.axis_name == 'batch'
