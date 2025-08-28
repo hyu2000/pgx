@@ -34,8 +34,8 @@ from omegaconf import OmegaConf
 from examples.alphazero.config import Config
 from examples.alphazero.mctx_search import make_recurrent_fn
 from pgx.experimental import auto_reset
+from examples.alphazero.network import create_model
 
-from network import AZNet
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -52,18 +52,6 @@ assert(os.path.isdir(CHECKPOINT_DIR))
 baseline_id = 'go_5x5C2_250722-193343/000200'
 baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
-
-def create_model(key, input_channels, spatial_size):
-    """Create an Equinox model."""
-    return AZNet(
-        num_actions=env.num_actions,
-        input_channels=input_channels,
-        num_channels=config.num_channels,
-        num_blocks=config.num_layers,
-        resnet_v2=config.resnet_v2,
-        spatial_size=spatial_size,
-        key=key
-    )
 
 def forward_fn(model, state, x):
     """Forward pass with Equinox model."""
@@ -128,9 +116,7 @@ class SelfplayOutput(NamedTuple):
 
 
 @eqx.filter_pmap
-def selfplay(model, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
-    # Reconstruct full model from trainable and non-trainable parts
-    # model = eqx.combine(trainable_params, non_trainable_model)
+def selfplay(inference_model, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
     batch_size = config.selfplay_batch_size // num_devices
 
     def step_fn(state, key) -> SelfplayOutput:
@@ -139,13 +125,11 @@ def selfplay(model, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
         key1, key2 = jax.random.split(key)
         observation = state.observation
 
-        # Use inference mode for self-play evaluation
-        inference_model = eqx.nn.inference_mode(model)
         (logits, value), _ = forward_fn(inference_model, bn_state, state.observation)
         root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
 
         policy_output = mctx.gumbel_muzero_policy(
-            params=(model, bn_state),
+            params=(inference_model, bn_state),
             rng_key=key1,
             root=root,
             recurrent_fn=recurrent_fn,
@@ -275,27 +259,18 @@ def main():
     wandb.init(project="pgx-az", config=config.model_dump())
 
     # Initialize model and opt_state
-    dummy_state = jax.vmap(env.init)(jax.random.split(jax.random.PRNGKey(0), 2))
-    dummy_input = dummy_state.observation
-    input_channels = dummy_input.shape[-1]  # Last dimension is channels
-    spatial_size = dummy_input.shape[1] * dummy_input.shape[2]  # Height * width
-    
     # Create Equinox model with proper state handling
     model_key = jax.random.PRNGKey(0)
-    model, bn_state = eqx.nn.make_with_state(create_model)(model_key, input_channels, spatial_size)
-
+    model, bn_state = create_model(env, config, key=model_key)
     # For the optimizer we only need the trainable parameters (exclude axis_name strings)
     params, static = eqx.partition(model, eqx.is_array)
     opt_state = optimizer.init(params)
 
     # Replicate only the trainable parts, bn_state, and opt_state
-    params_replicated, bn_state, opt_state = jax.device_put_replicated(
+    params, bn_state, opt_state = jax.device_put_replicated(
         (params, bn_state, opt_state), devices
     )
-    model_replicated = eqx.combine(params_replicated, static)
-    
-    # Store the trainable and non-trainable parts for use in functions
-    # We'll reconstruct the model within each pmap function
+    model_replicated = eqx.combine(params, static)
 
     # Prepare checkpoint dir
     now = datetime.datetime.now(tz=ZoneInfo("America/New_York"))
@@ -312,11 +287,13 @@ def main():
 
     rng_key = jax.random.PRNGKey(config.seed)
     while True:
+        # Use inference mode for self-play evaluation
+        inference_model = eqx.nn.inference_mode(model_replicated)
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
             keys = jax.random.split(subkey, num_devices)
-            R = evaluate(keys, model_replicated, bn_state)
+            R = evaluate(keys, inference_model, bn_state)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
@@ -329,23 +306,18 @@ def main():
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints - extract device 0 from arrays only
             def extract_device_0(x):
-                if hasattr(x, '__getitem__') and hasattr(x, 'shape'):
-                    return x[0]
-                else:
-                    return x
-            
-            # trainable_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (model_replicated, bn_state, opt_state))
-            model_0, bn_state_0, opt_state_0 = model_replicated, bn_state, opt_state
-            # Reconstruct full model for checkpointing
-            # model_0 = eqx.combine(trainable_0, non_trainable_model)
+                return x[0]
+
+            params_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (params, bn_state, opt_state))
+            params_0, bn_state_0, opt_state_0 = jax.device_get(params_0), jax.device_get(bn_state_0), jax.device_get(opt_state_0)
+            model_0 = eqx.combine(params_0, static)
             print(f'checkpointing to {ckpt_dir}/{iteration}')
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
                     "rng_key": rng_key,
-                    "model": jax.device_get(model_0),
-                    "bn_state": jax.device_get(bn_state_0),
-                    "opt_state": jax.device_get(opt_state_0),
+                    "model": (model_0, bn_state_0),
+                    "opt_state": opt_state_0,
                     "iteration": iteration,
                     "frames": frames,
                     "hours": hours,
@@ -368,7 +340,7 @@ def main():
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         keys = jax.random.split(subkey, num_devices)
-        data: SelfplayOutput = selfplay(model_replicated, bn_state, keys)
+        data: SelfplayOutput = selfplay(inference_model, bn_state, keys)
         samples: Sample = compute_loss_input(data)
 
         # Shuffle samples and make minibatches
