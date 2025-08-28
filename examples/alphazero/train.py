@@ -202,7 +202,7 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
 
 
 def loss_fn(model, bn_state, samples: Sample):
-    (logits, value), _ = forward_fn(model, bn_state, samples.obs)
+    (logits, value), new_bn_state = forward_fn(model, bn_state, samples.obs)
 
     policy_loss = optax.softmax_cross_entropy(logits, samples.policy_tgt)
     policy_loss = jnp.mean(policy_loss)
@@ -210,19 +210,21 @@ def loss_fn(model, bn_state, samples: Sample):
     value_loss = optax.l2_loss(value, samples.value_tgt)
     value_loss = jnp.mean(value_loss * samples.mask)  # mask if the episode is truncated
 
-    return policy_loss + value_loss, (policy_loss, value_loss)
+    return policy_loss + value_loss, (policy_loss, value_loss, new_bn_state)
 
 
 @partial(eqx.filter_pmap, axis_name="i")
 def train(model, bn_state, opt_state, data: Sample):
 
-    grads, (policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
+    grads, (policy_loss, value_loss, new_bn_state) = eqx.filter_grad(loss_fn, has_aux=True)(
         model, bn_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
+    # Average the BatchNorm state across devices
+    new_bn_state = jax.lax.pmean(new_bn_state, axis_name="i")
     updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     new_model = eqx.apply_updates(model, updates)
-    return new_model, bn_state, opt_state, policy_loss, value_loss
+    return new_model, new_bn_state, opt_state, policy_loss, value_loss
 
 
 @eqx.filter_pmap
