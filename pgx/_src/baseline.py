@@ -1,5 +1,6 @@
 import os
 import pickle
+from functools import partial
 from typing import Literal, Any
 
 import jax
@@ -72,25 +73,25 @@ def init_az_random_model(env, rng_key):
     return apply
 
 
-class ModelEqx(eqx.Module):
-    """ wrap model """
-    model_params: Any
-    model_state: Any
+# class ModelEqx(eqx.Module):
+#     """ wrap model """
+#     model_params: Any
+#     model_state: Any
+#
+#     def __init__(self, fpath):
+#         config, model_params, model_state = _load_checkpoint(f'{fpath}')
+#         model_args = {'num_actions': 26, 'num_channels': config.num_channels,
+#                       'num_layers': config.num_layers, 'resnet_v2': config.resnet_v2}
+#
+#         self.net = _create_az_model_v0(**model_args)
+#         self.model_params = model_params
+#         self.model_state = model_state
+#
+#     def __call__(self, x):
+#         return self.net(x, is_training=False, test_local_stats=False)
 
-    def __init__(self, fpath):
-        config, model_params, model_state = _load_checkpoint(f'{fpath}')
-        model_args = {'num_actions': 26, 'num_channels': config.num_channels,
-                      'num_layers': config.num_layers, 'resnet_v2': config.resnet_v2}
 
-        self.net = _create_az_model_v0(**model_args)
-        self.model_params = model_params
-        self.model_state = model_state
-
-    def __call__(self, x):
-        return self.net(x, is_training=False, test_local_stats=False)
-
-
-def load_baseline_model(fpath: str, is_eval: bool = True):
+def load_hk_baseline_model(fpath: str, is_eval: bool = True):
     """ return everything: forward_apply(param, state, ...), param, state """
     import haiku as hk
 
@@ -110,7 +111,8 @@ def load_baseline_model(fpath: str, is_eval: bool = True):
     #     (logits, value), _ = forward.apply(model_params, model_state, obs, is_eval=True)
     #     return logits, value
 
-    return forward.apply, model_params, model_state
+    model_apply = partial(forward.apply, is_eval=True)
+    return model_apply, model_params, model_state
 
 
 def _make_az_baseline_model(model_id: BaselineModelId, download_dir: str = "baselines"):

@@ -1,8 +1,10 @@
 """Equinox implementation of AlphaZero network architecture"""
+import pickle
+
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from typing import Optional
+from typing import Optional, Tuple
 
 
 class BlockV1(eqx.Module):
@@ -89,8 +91,8 @@ class AZNet(eqx.Module):
     num_actions: int
     num_channels: int
     num_blocks: int
-    resnet_v2: bool
     spatial_size: int  # Height * width of board
+    resnet_v2: bool
 
     def __init__(
         self,
@@ -147,11 +149,11 @@ class AZNet(eqx.Module):
         x = x.astype(jnp.float32)
         
         # Ensure x has channel-first format: (batch, channels, height, width)
-        if x.ndim == 4:
-            x = jnp.transpose(x, (0, 3, 1, 2))
-        elif x.ndim == 3:  # Add channel dimension
-            x = x[..., None]  # Add channel as last dim
-            x = jnp.transpose(x, (0, 3, 1, 2))  # Move to channel-first
+        assert x.ndim == 4
+        x = jnp.transpose(x, (0, 3, 1, 2))
+        # elif x.ndim == 3:  # Add channel dimension
+        #     x = x[..., None]  # Add channel as last dim
+        #     x = jnp.transpose(x, (0, 3, 1, 2))  # Move to channel-first
         
         # Equinox Conv2d expects unbatched inputs, so we need to vmap over the batch dimension
         def single_forward(single_x, single_state):
@@ -196,10 +198,38 @@ class AZNet(eqx.Module):
         
         # Apply over batch dimension with axis_name for BatchNorm
         (logits_batch, values_batch), new_state = jax.vmap(
-            single_forward, 
+            single_forward,
             in_axes=(0, None), 
             out_axes=(0, None),
             axis_name="batch"
         )(x, state)
         
         return (logits_batch, values_batch), new_state
+
+
+def create_model(env, config, key) -> Tuple:
+    """Create an Equinox model, initialize """
+    dummy_state = jax.vmap(env.init)(jax.random.split(jax.random.PRNGKey(0), 2))
+    dummy_input = dummy_state.observation
+    input_channels = dummy_input.shape[-1]  # Last dimension is channels
+    spatial_size = dummy_input.shape[1] * dummy_input.shape[2]  # Height * width
+    return eqx.nn.make_with_state(AZNet)(
+        num_actions=env.num_actions,
+        input_channels=input_channels,
+        num_channels=config.num_channels,
+        num_blocks=config.num_layers,
+        resnet_v2=config.resnet_v2,
+        spatial_size=spatial_size,
+        key=key
+    )
+
+
+def load_from_ckpt(fpath: str) -> Tuple:
+    with open(fpath, "rb") as f:
+        d = pickle.load(f)
+    model_params, model_state = d["model"]
+
+    def forward_fn(model, state, x):
+        return model(x, state)
+
+    return forward_fn, model_params, model_state

@@ -4,10 +4,10 @@ import platform
 import jax
 import jax.numpy as jnp
 import pgx
+import equinox as eqx
+# import haiku as hk
 
-import haiku as hk
-
-from examples.alphazero.network import AZNet
+from examples.alphazero.network import AZNet, create_model, load_from_ckpt
 from examples.alphazero import mctx_search
 from pgx._src.baseline import init_az_random_model
 
@@ -15,7 +15,6 @@ from pgx._src.baseline import init_az_random_model
 
 print(pgx.__version__)
 print(jax.__version__)
-print(hk.__version__)
 
 
 def test_load_checkpoint():
@@ -33,7 +32,7 @@ def sample_legal_action(rng_key, logits, legal_mask):
     return jax.random.categorical(rng_key, logits=masked_logits, axis=-1)
 
 
-def load_go5_checkpoint():
+def load_go5_checkpoint_hk():
     env_id = "go_5x5C2"
     model_id = f"{env_id}_v0"
     # model is a function: model(state.observation)
@@ -44,15 +43,16 @@ def load_go5_checkpoint():
     return model
 
 
-def test_run_game_mctx():
+def test_run_game_mctx_hk():
     env_id = "go_5x5C2"
     rng_key = jax.random.PRNGKey(1)
     env = pgx.make(env_id)
 
-    from pgx._src.baseline import load_baseline_model
+    from pgx._src.baseline import load_hk_baseline_model
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
     fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250722-193343/000200.ckpt'
-    model_apply, model_param, model_state = load_baseline_model(fpath)
+    # fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250827-130633/000005.ckpt'
+    model_apply, model_param, model_state = load_hk_baseline_model(fpath)
     model = (model_param, model_state)
 
     init_fn = jax.jit(jax.vmap(env.init))
@@ -77,6 +77,43 @@ def test_run_game_mctx():
     pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
 
 
+def load_go5_checkpoint_eqx():
+    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250827-212237/000005.ckpt'
+    return load_from_ckpt(fpath)
+
+
+def test_run_game_mctx_eqx():
+    env_id = "go_5x5C2"
+    rng_key = jax.random.PRNGKey(1)
+    env = pgx.make(env_id)
+
+    model_apply, model_param, model_state = load_go5_checkpoint_eqx()
+    model_param = eqx.nn.inference_mode(model_param)
+    model = (model_param, model_state)
+
+    init_fn = jax.jit(jax.vmap(env.init))
+    step_fn = jax.jit(jax.vmap(env.step))
+    recur_fn = mctx_search.make_recurrent_fn(model_apply, env.step)
+
+    history = []
+    batch_size = 2
+    rng_key, key2 = jax.random.split(rng_key)
+    keys = jax.random.split(key2, batch_size)
+    state = init_fn(keys)
+    history.append(state)
+    assert len(state.observation) == batch_size
+    while not (state.terminated | state.truncated).all():
+        (logits, value), _ = model_param(state.observation, model_state)
+        rng_key, key2 = jax.random.split(rng_key)
+        policy_output = mctx_search.improve_policy_with_mcts(model_apply, recur_fn, model, state, key2, num_simulations=2)
+        action = policy_output.action
+        state = step_fn(state, action)
+        history.append(state)
+
+    pgx.save_svg_animation(history, f"{env_id}.svg", frame_duration_seconds=1)
+
+
 def test_run_game_raw_policy():
     """ runs on jax cpu! jax-metal 0.1.1 erred out
     """
@@ -85,7 +122,7 @@ def test_run_game_raw_policy():
 
     env = pgx.make(env_id)
     rng_key, key2 = jax.random.split(rng_key)
-    model = load_go5_checkpoint()
+    model_apply, model_param, model_state = load_go5_checkpoint_eqx()
     # model = init_az_random_model(env, key2)
 
     init_fn = jax.jit(jax.vmap(env.init))
@@ -99,7 +136,7 @@ def test_run_game_raw_policy():
     states.append(state)
     assert len(state.observation) == batch_size
     while not (state.terminated | state.truncated).all():
-        logits, value = model(state.observation)
+        (logits, value), _ = model_param(state.observation, model_state)
         # action = logits.argmax(axis=-1)
         rng_key, key2 = jax.random.split(rng_key)
         action = sample_legal_action(key2, logits, state.legal_action_mask)
@@ -120,10 +157,30 @@ def forward_fn(x, is_eval=True):
     return policy_out, value_out
 
 
+def test_init_save():
+    """ """
+    from examples.alphazero.config import Config
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+    if False:
+        config = Config()
+        model_params, model_state = create_model(env, config, key=key)
+        print(type(model_state))
+    else:
+        model_apply, model_params, model_state = load_go5_checkpoint_eqx()
+
+    batch_size = 2
+    keys = jax.random.split(key, batch_size)
+    init_fn = jax.jit(jax.vmap(env.init))
+    state = init_fn(keys)
+    print(state.observation.shape)
+    (logits, value), _ = model_params(state.observation, model_state)
+    print(value)
+
+
 def test_play_random_model():
     """ random play on go5CX2 """
     env_id = "go_5x5C2"
-
     env = pgx.make(env_id)
 
     # random init a model

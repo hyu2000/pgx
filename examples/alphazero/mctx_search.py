@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 import mctx
 import pgx
+import equinox as eqx
 
 
 def make_recurrent_fn(forward_fn, env_step):
@@ -46,13 +47,13 @@ def make_recurrent_fn(forward_fn, env_step):
     return recurrent_fn
 
 
-@partial(jax.jit, static_argnums=[0, 1, 5])
+@partial(eqx.filter_jit)  #, static_argnums=[0, 1, 5])
 # if we jit this func, num_simulation needs to be marked as static. If instead we want to jit its callers,
 # how do we mark this static_arg? In a big project, there are lots of args sprinkled around that are configs
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
     model_params, model_state = model
     (logits, value), _ = forward_apply(
-        model_params, model_state, state.observation, is_eval=True
+        model_params, model_state, state.observation
     )
     root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
 
