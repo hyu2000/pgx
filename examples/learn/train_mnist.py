@@ -14,7 +14,7 @@ import torch  # https://pytorch.org
 import torchvision  # https://pytorch.org
 from jaxtyping import Array, Float, Int, PyTree  # https://github.com/google/jaxtyping
 
-from examples.learn.conv_net import CNN, loss
+from examples.learn.conv_net import CNN, loss, train
 
 # Hyperparameters
 
@@ -72,3 +72,9 @@ print(loss_value.shape)  # scalar loss
 # Example inference
 output = jax.vmap(model)(dummy_x)
 print(output.shape)  # batch of predictions
+
+
+# Training
+optim = optax.adamw(LEARNING_RATE)
+
+model = train(model, trainloader, testloader, optim, STEPS, PRINT_EVERY)
