@@ -76,34 +76,6 @@ optimizer = optax.adam(lr_schedule_exp)
 # )
 
 
-"""
-def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
-    # model: params
-    # state: embedding
-    del rng_key
-    model_params, model_state = model
-
-    current_player = state.current_player
-    state = jax.vmap(env.step)(state, action)
-
-    (logits, value), _ = forward.apply(model_params, model_state, state.observation, is_eval=True)
-    # mask invalid actions
-    logits = logits - jnp.max(logits, axis=-1, keepdims=True)
-    logits = jnp.where(state.legal_action_mask, logits, jnp.finfo(logits.dtype).min)
-
-    reward = state.rewards[jnp.arange(state.rewards.shape[0]), current_player]
-    value = jnp.where(state.terminated, 0.0, value)
-    discount = -1.0 * jnp.ones_like(value)
-    discount = jnp.where(state.terminated, 0.0, discount)
-
-    recurrent_fn_output = mctx.RecurrentFnOutput(
-        reward=reward,
-        discount=discount,
-        prior_logits=logits,
-        value=value,
-    )
-    return recurrent_fn_output, state
-"""
 recurrent_fn = make_recurrent_fn(forward_fn, env.step)
 
 
@@ -310,7 +282,9 @@ def main():
             def extract_device_0(x):
                 return x[0]
 
-            params_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (params, bn_state, opt_state))
+            # Extract trainable parameters from the updated model
+            params_current, _ = eqx.partition(model_replicated, eqx.is_array)
+            params_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (params_current, bn_state, opt_state))
             params_0, bn_state_0, opt_state_0 = jax.device_get(params_0), jax.device_get(bn_state_0), jax.device_get(opt_state_0)
             model_0 = eqx.combine(params_0, static)
             print(f'checkpointing to {ckpt_dir}/{iteration}')

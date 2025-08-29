@@ -9,23 +9,19 @@ import equinox as eqx
 
 
 def make_recurrent_fn(forward_fn, env_step):
-    """ forward_fn: Equinox forward function (model, bn_state, obs) -> ((logits, value), new_state)
+    """ forward_fn: Equinox forward function (model_param, model_state, obs) -> ((logits, value), new_state)
     """
 
-    def recurrent_fn(model_tuple, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
+    def recurrent_fn(inference_model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
         """
-        Equinox-compatible recurrent function for MCTS
         """
         del rng_key
-        model, bn_state = model_tuple
+        model_param, model_state = inference_model
 
         current_player = state.current_player
         state = jax.vmap(env_step)(state, action)
 
-        # Use inference mode for MCTS evaluation
-        import equinox as eqx
-        inference_model = eqx.nn.inference_mode(model)
-        (logits, value), _ = forward_fn(inference_model, bn_state, state.observation)
+        (logits, value), _ = forward_fn(model_param, model_state, state.observation)
         
         # mask invalid actions
         logits = logits - jnp.max(logits, axis=-1, keepdims=True)
