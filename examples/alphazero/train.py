@@ -188,19 +188,19 @@ def loss_fn(model, bn_state, samples: Sample):
 @partial(eqx.filter_pmap, axis_name="i")
 def train(model, bn_state, opt_state, data: Sample):
 
-    grads, (policy_loss, value_loss, new_bn_state) = eqx.filter_grad(loss_fn, has_aux=True)(
+    grads, (policy_loss, value_loss, bn_state) = eqx.filter_grad(loss_fn, has_aux=True)(
         model, bn_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
     # Average the BatchNorm state across devices
-    new_bn_state = jax.lax.pmean(new_bn_state, axis_name="i")
+    bn_state = jax.lax.pmean(bn_state, axis_name="i")
     updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
     new_model = eqx.apply_updates(model, updates)
-    return new_model, new_bn_state, opt_state, policy_loss, value_loss
+    return new_model, bn_state, opt_state, policy_loss, value_loss
 
 
 @eqx.filter_pmap
-def evaluate(rng_key, my_model, my_bn_state):
+def evaluate(rng_key, inference_model, my_bn_state):
     """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
     my_player = 0
@@ -212,7 +212,6 @@ def evaluate(rng_key, my_model, my_bn_state):
 
     def body_fn(val):
         key, state, R = val
-        inference_model = eqx.nn.inference_mode(my_model)
         (my_logits, _), _ = forward_fn(inference_model, my_bn_state, state.observation)
         opp_logits, _ = baseline(state.observation)
         is_my_turn = (state.current_player == my_player).reshape((-1, 1))
