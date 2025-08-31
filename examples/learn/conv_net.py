@@ -12,21 +12,24 @@ from jaxtyping import Array, Float, Int, PyTree  # https://github.com/google/jax
 class CNN(eqx.Module):
     layers: list
 
-    def __init__(self, key):
-        key1, key2, key3, key4 = jax.random.split(key, 4)
+    def __init__(self, key, bn_mode='ema'):
+        keys = jax.random.split(key, 5)
         # Standard CNN setup: convolutional layer, followed by flattening,
         # with a small MLP on top.
         self.layers = [
-            eqx.nn.Conv2d(1, 3, kernel_size=4, key=key1),  # 4x4, padding=valid: 28x28 -> 25x25
+            eqx.nn.Conv2d(1, 3, kernel_size=3, padding='SAME', key=keys[0]),
+            eqx.nn.BatchNorm(3, axis_name='batch', mode=bn_mode),
+            jax.nn.relu,
+            eqx.nn.Conv2d(3, 3, kernel_size=4, key=keys[1]),  # 4x4, padding=valid: 28x28 -> 25x25
             eqx.nn.MaxPool2d(kernel_size=2),  # 2x2, valid: H-1, W-1
+            eqx.nn.BatchNorm(3, axis_name='batch', mode=bn_mode),
             jax.nn.relu,
-            eqx.nn.BatchNorm(3, axis_name='batch', mode='batch'),
             jnp.ravel,
-            eqx.nn.Linear(1728, 512, key=key2),
+            eqx.nn.Linear(1728, 512, key=keys[2]),
             jax.nn.sigmoid,
-            eqx.nn.Linear(512, 64, key=key3),
+            eqx.nn.Linear(512, 64, key=keys[3]),
             jax.nn.relu,
-            eqx.nn.Linear(64, 10, key=key4),
+            eqx.nn.Linear(64, 10, key=keys[4]),
             jax.nn.log_softmax,
         ]
 
@@ -45,7 +48,7 @@ class CNN(eqx.Module):
 
 
 @eqx.filter_jit
-def loss(
+def loss_fn(
     model: CNN, state: eqx.nn.State, x: Float[Array, "batch 1 28 28"], y: Int[Array, " batch"]
 ) -> Tuple[Float[Array, ""], eqx.nn.State]:
     # Our input has the shape (BATCH_SIZE, 1, 28, 28), but our model operations on
@@ -93,7 +96,7 @@ def evaluate(model: CNN, state: eqx.nn.State, testloader: torch.utils.data.DataL
         y = y.numpy()
         # Note that all the JAX operations happen inside `loss` and `compute_accuracy`,
         # and both have JIT wrappers, so this is fast.
-        batch_loss, _ = loss(model, state, x, y)
+        batch_loss, _ = loss_fn(model, state, x, y)
         avg_loss += batch_loss
         avg_acc += compute_accuracy(inference_model, x, y)
     return avg_loss / len(testloader), avg_acc / len(testloader)
@@ -123,7 +126,7 @@ def train_loop(
         x: Float[Array, "batch 1 28 28"],
         y: Int[Array, " batch"],
     ):
-        (loss_value, state), grads = eqx.filter_value_and_grad(loss, has_aux=True)(model, state, x, y)
+        (loss_value, state), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model, state, x, y)
         updates, opt_state = optim.update(
             grads, opt_state, eqx.filter(model, eqx.is_array)
         )
@@ -152,6 +155,6 @@ def train_loop(
 
 def test_cnn():
     key = jax.random.PRNGKey(0)
-    cnn = CNN(key)
-    bn_layers = [isinstance(l, eqx.nn.BatchNorm) for l in cnn.layers]
+    cnn = CNN(key, bn_mode='ema')
+    bn_layers = [l for l in cnn.layers if isinstance(l, eqx.nn.BatchNorm)]
     print(bn_layers)

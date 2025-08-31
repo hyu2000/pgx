@@ -14,7 +14,7 @@ import torch  # https://pytorch.org
 import torchvision  # https://pytorch.org
 from jaxtyping import Array, Float, Int, PyTree  # https://github.com/google/jaxtyping
 
-from examples.learn.conv_net import CNN, loss, train_loop
+from examples.learn.conv_net import CNN, loss_fn, train_loop
 
 # Hyperparameters
 
@@ -66,14 +66,15 @@ key, subkey = jax.random.split(key, 2)
 model, state = eqx.nn.make_with_state(CNN)(subkey)
 
 
-# Example loss
-loss_value, _ = loss(model, state, dummy_x, dummy_y)
-print(loss_value.shape)  # scalar loss
-# Example inference
-inference_model = eqx.nn.inference_mode(model)
-inference_model = eqx.Partial(inference_model, state=state)
-output, _ = jax.vmap(inference_model)(dummy_x)
-print(output.shape)  # batch of predictions
+if True:
+    # Example inference
+    inference_model = eqx.nn.inference_mode(model)
+    inference_model = eqx.Partial(inference_model, state=state)
+    output, _ = jax.vmap(inference_model)(dummy_x)
+    print(output.shape)  # batch of predictions
+    # Example loss
+    loss_value, _ = loss_fn(model, state, dummy_x, dummy_y)
+    print(loss_value.shape)  # scalar loss
 
 
 # Training
