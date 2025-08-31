@@ -20,7 +20,7 @@ class CNN(eqx.Module):
             eqx.nn.Conv2d(1, 3, kernel_size=4, key=key1),  # 4x4, padding=valid: 28x28 -> 25x25
             eqx.nn.MaxPool2d(kernel_size=2),  # 2x2, valid: H-1, W-1
             jax.nn.relu,
-            eqx.nn.BatchNorm(3, axis_name='batch'),
+            eqx.nn.BatchNorm(3, axis_name='batch', mode='batch'),
             jnp.ravel,
             eqx.nn.Linear(1728, 512, key=key2),
             jax.nn.sigmoid,
@@ -38,6 +38,10 @@ class CNN(eqx.Module):
             else:
                 x = layer(x)
         return x, state
+
+    def batch_call(self, x_batch: Float[Array, "batch 1 28 28"], state: eqx.nn.State) -> Tuple[Float[Array, "batch 10"], eqx.nn.State]:
+        """ batch eval """
+        return jax.vmap(self.__call__, axis_name='batch', in_axes=(0, None), out_axes=(0, None))(x_batch, state)
 
 
 @eqx.filter_jit
