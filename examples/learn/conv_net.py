@@ -53,7 +53,7 @@ def loss(
     #
     # Therefore, we have to use jax.vmap, which in this case maps our model over the
     # leading (batch) axis.
-    pred_y, state = jax.vmap(model, axis_name='batch', in_axes=(0, None), out_axes=(0, None))(x, state)
+    pred_y, state = model.batch_call(x, state)
     return cross_entropy(y, pred_y), state
 
 
