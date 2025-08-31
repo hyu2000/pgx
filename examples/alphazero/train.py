@@ -174,7 +174,7 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
 
 
 def loss_fn(model, bn_state, samples: Sample):
-    (logits, value), new_bn_state = forward_fn(model, bn_state, samples.obs)
+    (logits, value), bn_state = forward_fn(model, bn_state, samples.obs)
 
     policy_loss = optax.softmax_cross_entropy(logits, samples.policy_tgt)
     policy_loss = jnp.mean(policy_loss)
@@ -182,7 +182,7 @@ def loss_fn(model, bn_state, samples: Sample):
     value_loss = optax.l2_loss(value, samples.value_tgt)
     value_loss = jnp.mean(value_loss * samples.mask)  # mask if the episode is truncated
 
-    return policy_loss + value_loss, (policy_loss, value_loss, new_bn_state)
+    return policy_loss + value_loss, (policy_loss, value_loss, bn_state)
 
 
 @partial(eqx.filter_pmap, axis_name="i")
@@ -235,6 +235,7 @@ def main():
     # Create Equinox model with proper state handling
     model_key = jax.random.PRNGKey(0)
     model, bn_state = create_model(env, config, key=model_key)
+
     # For the optimizer we only need the trainable parameters (exclude axis_name strings)
     params, static = eqx.partition(model, eqx.is_array)
     opt_state = optimizer.init(params)
