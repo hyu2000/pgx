@@ -62,7 +62,7 @@ class ResnetPolicyValueNet(eqx.Module):
         self.input_dims = input_dims
         self.num_actions = num_actions
         self.backbone = eqx.Sequential(
-            eqx.Conv2D(num_input_channels, dim, 1), eqx.BatchNorm2D(dim)
+            eqx.nn.Conv2d(num_input_channels, dim, 1), eqx.BatchNorm2D(dim)
         )
         for _ in range(num_resblock):
             self.backbone >>= ResidualBlock(dim)

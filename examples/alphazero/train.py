@@ -69,7 +69,7 @@ lr_schedule = optax.cosine_decay_schedule(
     decay_steps=config.lr_decay_steps,
     alpha=0.2
 )
-optimizer = optax.adam(lr_schedule_exp)
+optimizer = optax.adam(lr_schedule)
 # optimizer = optax.chain(
 #     optax.add_decayed_weights(config.weight_decay),
 #     optax.sgd(lr_schedule, momentum=0.9),

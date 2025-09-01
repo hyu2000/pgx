@@ -79,7 +79,7 @@ def test_run_game_mctx_hk():
 
 def load_go5_checkpoint_eqx():
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
-    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250827-212237/000005.ckpt'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250831-215449/000005.ckpt'
     return load_from_ckpt(fpath)
 
 
@@ -159,23 +159,29 @@ def forward_fn(x, is_eval=True):
 
 def test_init_save():
     """ """
-    from examples.alphazero.config import Config
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
-    if False:
+    if True:
+        from examples.alphazero.config import Config
         config = Config()
         model_params, model_state = create_model(env, config, key=key)
         print(type(model_state))
     else:
         model_apply, model_params, model_state = load_go5_checkpoint_eqx()
 
+    # do some inference
     batch_size = 2
     keys = jax.random.split(key, batch_size)
     init_fn = jax.jit(jax.vmap(env.init))
     state = init_fn(keys)
     print(state.observation.shape)
-    (logits, value), _ = model_params(state.observation, model_state)
+    inference_model = eqx.nn.inference_mode(model_params)
+    # (logits, value), _ = inference_model(state.observation, model_state)
+    # print(value)
+    forward_fn = eqx.filter_jit(model_params)
+    (logits, value), _ = forward_fn(state.observation, model_state)
     print(value)
+
 
 
 def test_play_random_model():

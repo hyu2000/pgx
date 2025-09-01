@@ -26,15 +26,15 @@ class BlockV2(eqx.Module):
 
     def __call__(self, x: jnp.ndarray, state: eqx.nn.State) -> tuple[jnp.ndarray, eqx.nn.State]:
         identity = x
-        
+
         x, state = self.bn1(x, state)
         x = jax.nn.relu(x)
         x = self.conv1(x)
-        
+
         x, state = self.bn2(x, state)
         x = jax.nn.relu(x)
         x = self.conv2(x)
-        
+
         return x + identity, state
 
 
@@ -69,7 +69,7 @@ class AZNet(eqx.Module):
         num_channels: int = 64,
         num_blocks: int = 5,
         spatial_size: int = 25,  # Default for 5x5 board
-        batch_norm_mode = 'ema'
+        batch_norm_mode = 'batch'
     ):
         self.num_actions = num_actions
         self.num_channels = num_channels
@@ -87,9 +87,8 @@ class AZNet(eqx.Module):
             BlockV2(num_channels, batch_norm_mode=batch_norm_mode, key=keys[i + 1])
             for i in range(num_blocks)
         ]
-        # Final BatchNorm for ResNet v2 (after all blocks)
         self.final_bn = eqx.nn.BatchNorm(num_channels, axis_name="batch", mode=batch_norm_mode)
-        
+
         # Policy head
         self.policy_conv = eqx.nn.Conv2d(num_channels, 2, 1, key=keys[num_blocks+1])
         self.policy_bn = eqx.nn.BatchNorm(2, axis_name="batch", mode=batch_norm_mode)

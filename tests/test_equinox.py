@@ -4,6 +4,8 @@
 
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
+from pprint import pprint
 import equinox as eqx
 
 
@@ -146,3 +148,17 @@ def test_device_put_bn():
     # nn_device = eqx.combine(y, static)
     # print(nn_device)
     assert y.axis_name == 'batch'
+
+
+def test_device_get():
+    x = jax.numpy.array([1., 2., 3.])
+    x_host = jax.device_get(x)
+    print(x_host)
+
+
+def test_nn_state():
+    def create_model(num_channels):
+        from examples.alphazero.network import BlockV2
+        return BlockV2(num_channels, jax.random.PRNGKey(0))
+    model, bn_state = eqx.nn.make_with_state(create_model)(3)
+    pprint(jax.tree.structure(model))
