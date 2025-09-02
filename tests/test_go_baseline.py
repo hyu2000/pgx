@@ -7,7 +7,7 @@ import pgx
 import equinox as eqx
 # import haiku as hk
 
-from examples.alphazero.network import AZNet, create_model, load_from_ckpt
+from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn
 from examples.alphazero import mctx_search
 from pgx._src.baseline import init_az_random_model
 
@@ -79,8 +79,11 @@ def test_run_game_mctx_hk():
 
 def load_go5_checkpoint_eqx():
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
-    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250831-215449/000005.ckpt'
-    return load_from_ckpt(fpath)
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-110429/000005.ckpt'
+    model_params, model_state = load_from_ckpt(fpath)
+    model_params = eqx.nn.inference_mode(model_params)
+    batch_forward = get_batch_forward_fn(model_params, model_state)
+    return batch_forward, model_params, model_state
 
 
 def test_run_game_mctx_eqx():
@@ -88,13 +91,12 @@ def test_run_game_mctx_eqx():
     rng_key = jax.random.PRNGKey(1)
     env = pgx.make(env_id)
 
-    model_apply, model_param, model_state = load_go5_checkpoint_eqx()
-    model_param = eqx.nn.inference_mode(model_param)
+    batch_forward, model_param, model_state = load_go5_checkpoint_eqx()
     model = (model_param, model_state)
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
-    recur_fn = mctx_search.make_recurrent_fn(model_apply, env.step)
+    recur_fn = mctx_search.make_recurrent_fn(batch_forward, env.step)
 
     history = []
     batch_size = 2
@@ -104,9 +106,9 @@ def test_run_game_mctx_eqx():
     history.append(state)
     assert len(state.observation) == batch_size
     while not (state.terminated | state.truncated).all():
-        (logits, value), _ = model_param(state.observation, model_state)
+        # (logits, value), _ = model_param(state.observation, model_state)
         rng_key, key2 = jax.random.split(rng_key)
-        policy_output = mctx_search.improve_policy_with_mcts(model_apply, recur_fn, model, state, key2, num_simulations=2)
+        policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=2)
         action = policy_output.action
         state = step_fn(state, action)
         history.append(state)
@@ -122,7 +124,7 @@ def test_run_game_raw_policy():
 
     env = pgx.make(env_id)
     rng_key, key2 = jax.random.split(rng_key)
-    model_apply, model_param, model_state = load_go5_checkpoint_eqx()
+    batch_forward, model_param, model_state = load_go5_checkpoint_eqx()
     # model = init_az_random_model(env, key2)
 
     init_fn = jax.jit(jax.vmap(env.init))
@@ -136,7 +138,7 @@ def test_run_game_raw_policy():
     states.append(state)
     assert len(state.observation) == batch_size
     while not (state.terminated | state.truncated).all():
-        (logits, value), _ = model_param(state.observation, model_state)
+        (logits, value), _ = batch_forward(state.observation)
         # action = logits.argmax(axis=-1)
         rng_key, key2 = jax.random.split(rng_key)
         action = sample_legal_action(key2, logits, state.legal_action_mask)
@@ -161,13 +163,13 @@ def test_init_save():
     """ """
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
-    if True:
+    if False:
         from examples.alphazero.config import Config
         config = Config()
         model_params, model_state = create_model(env, config, key=key)
         print(type(model_state))
     else:
-        model_apply, model_params, model_state = load_go5_checkpoint_eqx()
+        batch_forward, model_params, model_state = load_go5_checkpoint_eqx()
 
     # do some inference
     batch_size = 2
@@ -175,12 +177,12 @@ def test_init_save():
     init_fn = jax.jit(jax.vmap(env.init))
     state = init_fn(keys)
     print(state.observation.shape)
-    inference_model = eqx.nn.inference_mode(model_params)
+    # inference_model = eqx.nn.inference_mode(model_params)
     # (logits, value), _ = inference_model(state.observation, model_state)
     # print(value)
-    forward_fn = eqx.filter_jit(eqx.filter_vmap(inference_model,
-                                                in_axes=(0, None), out_axes=(0, None), axis_name="batch"))
-    (logits, value), _ = forward_fn(state.observation, model_state)
+    # forward_fn = eqx.filter_jit(eqx.filter_vmap(inference_model,
+    #                                             in_axes=(0, None), out_axes=(0, None), axis_name="batch"))
+    (logits, value), _ = batch_forward(state.observation)
     print(value)
 
 

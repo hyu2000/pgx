@@ -21,7 +21,7 @@ def make_recurrent_fn(forward_fn, env_step):
         current_player = state.current_player
         state = jax.vmap(env_step)(state, action)
 
-        (logits, value), _ = forward_fn(model_param, model_state, state.observation)
+        (logits, value), _ = forward_fn(state.observation)
         
         # mask invalid actions
         logits = logits - jnp.max(logits, axis=-1, keepdims=True)
@@ -48,9 +48,7 @@ def make_recurrent_fn(forward_fn, env_step):
 # how do we mark this static_arg? In a big project, there are lots of args sprinkled around that are configs
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
     model_params, model_state = model
-    (logits, value), _ = forward_apply(
-        model_params, model_state, state.observation
-    )
+    (logits, value), _ = forward_apply(state.observation)
     root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
 
     policy_output = mctx.gumbel_muzero_policy(
