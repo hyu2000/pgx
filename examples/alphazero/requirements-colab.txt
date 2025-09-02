@@ -6,6 +6,7 @@ equinox
 flax
 mctx
 optax
+pytest
 wandb
 omegaconf
 pydantic

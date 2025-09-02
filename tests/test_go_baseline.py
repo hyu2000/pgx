@@ -79,7 +79,8 @@ def test_run_game_mctx_hk():
 
 def load_go5_checkpoint_eqx():
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
-    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-110429/000005.ckpt'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-161225/000010.ckpt'
+    # fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-163535/000010.ckpt'
     model_params, model_state = load_from_ckpt(fpath)
     model_params = eqx.nn.inference_mode(model_params)
     batch_forward = get_batch_forward_fn(model_params, model_state)
