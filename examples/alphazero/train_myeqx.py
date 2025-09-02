@@ -22,6 +22,7 @@ from functools import partial
 from typing import NamedTuple
 import platform
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import mctx
@@ -31,13 +32,15 @@ import wandb
 from omegaconf import OmegaConf
 
 from examples.alphazero.config import Config
+from examples.alphazero.mctx_search import make_recurrent_fn
 from pgx.experimental import auto_reset
-import equinox as eqx
 from examples.alphazero.network import create_model
+
 
 devices = jax.local_devices()
 num_devices = len(devices)
 
+# python train.py env_id=go_5x5C2 max_num_iters=200
 conf_dict = OmegaConf.from_cli()
 config: Config = Config(**conf_dict)
 print(config)
@@ -50,12 +53,9 @@ baseline_id = 'go_5x5C2_250722-193343/000200'
 baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
 
-def get_batch_forward_fn(model_params, model_state):
-    def batch_forward(x):
-        return eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            x, model_state
-        )
-    return batch_forward
+def forward_fn(model, state, x):
+    """Forward pass with Equinox model."""
+    return model(x, state)
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -70,6 +70,13 @@ lr_schedule = optax.cosine_decay_schedule(
     alpha=0.2
 )
 optimizer = optax.adam(lr_schedule)
+# optimizer = optax.chain(
+#     optax.add_decayed_weights(config.weight_decay),
+#     optax.sgd(lr_schedule, momentum=0.9),
+# )
+
+
+recurrent_fn = make_recurrent_fn(forward_fn, env.step)
 
 
 class SelfplayOutput(NamedTuple):
@@ -80,55 +87,21 @@ class SelfplayOutput(NamedTuple):
     discount: jnp.ndarray
 
 
-@partial(eqx.filter_pmap, in_axes=(None, 0))
-def selfplay(model, rng_key: jnp.ndarray) -> SelfplayOutput:
-    model_params, model_state = model
-    model_params = eqx.nn.inference_mode(model_params)
-    model = (model_params, model_state)
-    arr, static = eqx.partition(model, eqx.is_array)
-
-    def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
-        del rng_key
-        model = eqx.combine(model, static)
-        model_params, model_state = model
-
-        current_player = state.current_player
-        state = jax.vmap(env.step)(state, action)
-
-        # (logits, value), _ = forward.apply(model_params, model_state, state.observation, is_eval=True)
-        (logits, value), _ = eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            state.observation, model_state
-        )
-        # mask invalid actions
-        logits = logits - jnp.max(logits, axis=-1, keepdims=True)
-        logits = jnp.where(state.legal_action_mask, logits, jnp.finfo(logits.dtype).min)
-
-        reward = state.rewards[jnp.arange(state.rewards.shape[0]), current_player]
-        value = jnp.where(state.terminated, 0.0, value)
-        discount = -1.0 * jnp.ones_like(value)
-        discount = jnp.where(state.terminated, 0.0, discount)
-
-        recurrent_fn_output = mctx.RecurrentFnOutput(
-            reward=reward,
-            discount=discount,
-            prior_logits=logits,
-            value=value,
-        )
-        return recurrent_fn_output, state
-
+@eqx.filter_pmap
+def selfplay(inference_model, bn_state, rng_key: jnp.ndarray) -> SelfplayOutput:
     batch_size = config.selfplay_batch_size // num_devices
 
     def step_fn(state, key) -> SelfplayOutput:
+        """ state: simultaneous games (batch_size)
+        """
         key1, key2 = jax.random.split(key)
         observation = state.observation
 
-        (logits, value), _ = eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            state.observation, model_state
-        )
+        (logits, value), _ = forward_fn(inference_model, bn_state, state.observation)
         root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
 
         policy_output = mctx.gumbel_muzero_policy(
-            params=arr,
+            params=(inference_model, bn_state),
             rng_key=key1,
             root=root,
             recurrent_fn=recurrent_fn,
@@ -171,14 +144,19 @@ class Sample(NamedTuple):
 def compute_loss_input(data: SelfplayOutput) -> Sample:
     batch_size = config.selfplay_batch_size // num_devices
     # If episode is truncated, there is no value target
-    # So when we compute value loss, we need to mask it
+    # auto-reset: the next init state kept the previous terminated/truncated/rewards
+    # So when we compute value loss, we need to mask it (value_mask=0 means not using it)
     value_mask = jnp.cumsum(data.terminated[::-1, :], axis=0)[::-1, :] >= 1
 
     # Compute value target
+    # discount=-1 except 0 for terminated
+    # Be aware of off-by-1 error: rewards are stored at the next init state due to auto-reset, but next init-state shouldn't get that reward
+    # The bug affects value_tgt for init states
     def body_fn(carry, i):
         ix = config.max_num_steps - i - 1
-        v = data.reward[ix] + data.discount[ix] * carry
-        return v, v
+        v = -1 * carry
+        carry = data.reward[ix] + data.discount[ix] * carry
+        return carry, v
 
     _, value_tgt = jax.lax.scan(
         body_fn,
@@ -195,10 +173,8 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
     )
 
 
-def loss_fn(model_params, model_state, samples: Sample):
-    (logits, value), model_state = eqx.filter_vmap(
-        model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch"
-    )(samples.obs, model_state)
+def loss_fn(model, bn_state, samples: Sample):
+    (logits, value), bn_state = forward_fn(model, bn_state, samples.obs)
 
     policy_loss = optax.softmax_cross_entropy(logits, samples.policy_tgt)
     policy_loss = jnp.mean(policy_loss)
@@ -206,29 +182,28 @@ def loss_fn(model_params, model_state, samples: Sample):
     value_loss = optax.l2_loss(value, samples.value_tgt)
     value_loss = jnp.mean(value_loss * samples.mask)  # mask if the episode is truncated
 
-    return policy_loss + value_loss, (model_state, policy_loss, value_loss)
+    return policy_loss + value_loss, (policy_loss, value_loss, bn_state)
 
 
-@partial(eqx.filter_pmap, axis_name="i", in_axes=(None, None, 0), out_axes=(None, None, 0, 0))
-def train(model, opt_state, data: Sample):
-    model_params, model_state = model
-    grads, (model_state, policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
-        model_params, model_state, data
+@partial(eqx.filter_pmap, axis_name="i")
+def train(model, bn_state, opt_state, data: Sample):
+
+    grads, (policy_loss, value_loss, bn_state) = eqx.filter_grad(loss_fn, has_aux=True)(
+        model, bn_state, data
     )
     grads = jax.lax.pmean(grads, axis_name="i")
-    updates, opt_state = optimizer.update(grads, opt_state)
-    model_params = eqx.apply_updates(model_params, updates)
-    model = (model_params, model_state)
-    return model, opt_state, policy_loss, value_loss
+    # Average the BatchNorm state across devices
+    bn_state = jax.lax.pmean(bn_state, axis_name="i")
+    updates, opt_state = optimizer.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+    new_model = eqx.apply_updates(model, updates)
+    return new_model, bn_state, opt_state, policy_loss, value_loss
 
 
-@partial(eqx.filter_pmap, in_axes=(0, None))
-def evaluate(rng_key, my_model):
+@eqx.filter_pmap
+def evaluate(rng_key, inference_model, my_bn_state):
     """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
     my_player = 0
-    my_model, my_model_state = my_model
-    inference_model = eqx.nn.inference_mode(my_model)
 
     key, subkey = jax.random.split(rng_key)
     batch_size = config.eval_batch_size // num_devices
@@ -237,9 +212,7 @@ def evaluate(rng_key, my_model):
 
     def body_fn(val):
         key, state, R = val
-        (my_logits, _), _ = eqx.filter_vmap(inference_model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            state.observation, my_model_state
-        )
+        (my_logits, _), _ = forward_fn(inference_model, my_bn_state, state.observation)
         opp_logits, _ = baseline(state.observation)
         is_my_turn = (state.current_player == my_player).reshape((-1, 1))
         logits = jnp.where(is_my_turn, my_logits, opp_logits)
@@ -249,20 +222,29 @@ def evaluate(rng_key, my_model):
         R = R + state.rewards[jnp.arange(batch_size), my_player]
         return (key, state, R)
 
-    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
+    _, _, R = jax.lax.while_loop(
+        lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size))
+    )
     return R
 
 
 def main():
-    wandb.init(project='pgx-az', config=config.model_dump())
+    wandb.init(project="pgx-az", config=config.model_dump())
 
-    rng_key = jax.random.key(config.seed)
     # Initialize model and opt_state
-    rng_key, model_key = jax.random.split(rng_key)
-    init_model, state = create_model(env, config, key=model_key)
-    opt_state = optimizer.init(eqx.filter(init_model, eqx.is_array))
-    # replicates to all devices
-    model = (init_model, state)
+    # Create Equinox model with proper state handling
+    model_key = jax.random.PRNGKey(0)
+    model, bn_state = create_model(env, config, key=model_key)
+
+    # For the optimizer we only need the trainable parameters (exclude axis_name strings)
+    params, static = eqx.partition(model, eqx.is_array)
+    opt_state = optimizer.init(params)
+
+    # Replicate only the trainable parts, bn_state, and opt_state
+    params, bn_state, opt_state = jax.device_put_replicated(
+        (params, bn_state, opt_state), devices
+    )
+    model_replicated = eqx.combine(params, static)
 
     # Prepare checkpoint dir
     now = datetime.datetime.now(tz=ZoneInfo("America/New_York"))
@@ -274,15 +256,18 @@ def main():
     iteration: int = 0
     hours: float = 0.0
     frames: int = 0
-    grad_steps: int = 0
-    log = {"iteration": iteration, "hours": hours, "frames": frames, "grad_steps": grad_steps}
+    train_steps: int = 0
+    log = {"iteration": iteration, "hours": hours, "frames": frames, "train_steps": train_steps}
 
+    rng_key = jax.random.PRNGKey(config.seed)
     while True:
+        # Use inference mode for self-play evaluation
+        inference_model = eqx.nn.inference_mode(model_replicated)
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
             keys = jax.random.split(subkey, num_devices)
-            R = evaluate(keys, model)
+            R = evaluate(keys, inference_model, bn_state)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
@@ -292,15 +277,23 @@ def main():
                 }
             )
 
-            # Store checkpoints
-            # model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (train_model, opt_state))
-            model_0, opt_state_0 = eqx.filter((model[0], opt_state), eqx.is_array)
+        if iteration % config.checkpoint_interval == 0:
+            # Store checkpoints - extract device 0 from arrays only
+            def extract_device_0(x):
+                return x[0]
+
+            # Extract trainable parameters from the updated model
+            params_current, _ = eqx.partition(model_replicated, eqx.is_array)
+            params_0, bn_state_0, opt_state_0 = jax.tree_util.tree_map(extract_device_0, (params_current, bn_state, opt_state))
+            params_0, bn_state_0, opt_state_0 = jax.device_get(params_0), jax.device_get(bn_state_0), jax.device_get(opt_state_0)
+            model_0 = eqx.combine(params_0, static)
+            print(f'checkpointing to {ckpt_dir}/{iteration}')
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
                     "rng_key": rng_key,
-                    "model": jax.device_get(model_0),
-                    "opt_state": jax.device_get(opt_state_0),
+                    "model": (model_0, bn_state_0),
+                    "opt_state": opt_state_0,
                     "iteration": iteration,
                     "frames": frames,
                     "hours": hours,
@@ -323,28 +316,30 @@ def main():
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         keys = jax.random.split(subkey, num_devices)
-        data: SelfplayOutput = selfplay(model, keys)
+        data: SelfplayOutput = selfplay(inference_model, bn_state, keys)
         samples: Sample = compute_loss_input(data)
 
         # Shuffle samples and make minibatches
         samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
-        frames += samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
+        frames_cur_iter = samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
         samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[3:])), samples)
         rng_key, subkey = jax.random.split(rng_key)
         ixs = jax.random.permutation(subkey, jnp.arange(samples.obs.shape[0]))
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
         num_updates = samples.obs.shape[0] // config.training_batch_size
-        grad_steps += num_updates
-        minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples)
+        frames += frames_cur_iter
+        train_steps += num_updates
+        minibatches = jax.tree_util.tree_map(
+            lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples
+        )
 
         # Training
         policy_losses, value_losses = [], []
         for i in range(num_updates):
             minibatch: Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
-            model, opt_state, policy_loss, value_loss = train(model, opt_state, minibatch)
+            model_replicated, bn_state, opt_state, policy_loss, value_loss = train(model_replicated, bn_state, opt_state, minibatch)
             policy_losses.append(policy_loss.mean().item())
             value_losses.append(value_loss.mean().item())
-
         policy_loss = sum(policy_losses) / len(policy_losses)
         value_loss = sum(value_losses) / len(value_losses)
 
@@ -356,7 +351,7 @@ def main():
                 "train/value_loss": value_loss,
                 "hours": hours,
                 "frames": frames,
-                "grad_steps": grad_steps
+                "train_steps": train_steps
             }
         )
 
