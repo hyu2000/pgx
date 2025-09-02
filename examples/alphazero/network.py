@@ -122,14 +122,14 @@ class AZNet(eqx.Module):
             else:
                 x = layer(x)
 
-        logits = x.copy()  # why copy?
+        logits = x  # .copy()
         for layer in self.policy_head:
             if isinstance(layer, eqx.nn.StatefulLayer):
                 logits, state = layer(logits, state)
             else:
                 logits = layer(logits)
 
-        v = x.copy()
+        v = x  # .copy()
         for layer in self.value_head:
             if isinstance(layer, eqx.nn.StatefulLayer):
                 v, state = layer(v, state)
