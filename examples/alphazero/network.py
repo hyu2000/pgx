@@ -161,8 +161,12 @@ def load_from_ckpt(fpath: str) -> Tuple:
     with open(fpath, "rb") as f:
         d = pickle.load(f)
     model_params, model_state = d["model"]
+    return model_params, model_state
 
-    def forward_fn(model, state, x):
-        return model(x, state)
 
-    return forward_fn, model_params, model_state
+def get_batch_forward_fn(model_params, model_state):
+    def batch_forward(x):
+        return eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
+            x, model_state
+        )
+    return batch_forward

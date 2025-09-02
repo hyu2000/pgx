@@ -50,14 +50,6 @@ baseline_id = 'go_5x5C2_250722-193343/000200'
 baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
 
 
-def get_batch_forward_fn(model_params, model_state):
-    def batch_forward(x):
-        return eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            x, model_state
-        )
-    return batch_forward
-
-
 lr_schedule_exp = optax.exponential_decay(
     init_value=config.learning_rate,
     transition_steps=config.lr_decay_steps,
@@ -295,7 +287,7 @@ def main():
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
             # model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (train_model, opt_state))
-            model_0, opt_state_0 = eqx.filter((model[0], opt_state), eqx.is_array)
+            model_0, opt_state_0 = model, opt_state
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
                     "config": config,
