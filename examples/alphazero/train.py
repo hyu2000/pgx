@@ -292,6 +292,7 @@ def main():
                 }
             )
 
+        if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
             # model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (train_model, opt_state))
             model_0, opt_state_0 = eqx.filter((model[0], opt_state), eqx.is_array)

@@ -7,15 +7,15 @@ class Config(BaseModel):
     seed: int = 0
     max_num_iters: int = 400
     # network params
-    num_channels: int = 32  # 128
+    num_channels: int = 64  # 128
     num_layers: int = 6
     resnet_v2: bool = True
     # selfplay params
-    selfplay_batch_size: int = 4   # #games
+    selfplay_batch_size: int = 512   # #games
     num_simulations: int = 32
     max_num_steps: int = 64  # max_num_moves per game
     # training params
-    training_batch_size: int = 64   # #samples per batch
+    training_batch_size: int = 4096   # #samples per batch
     learning_rate: float = 0.01
     lr_decay_steps: int = 256  # halve LR every #steps
     weight_decay: float = 1e-4
