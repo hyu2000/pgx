@@ -1,6 +1,8 @@
 # We referred to Haiku's ResNet implementation:
 # https://github.com/deepmind/dm-haiku/blob/main/haiku/_src/nets/resnet.py
+from typing import Tuple
 
+import cloudpickle as pickle
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -69,6 +71,7 @@ class AZNet(eqx.Module):
         output_channels: int = 64,
         num_blocks: int = 5,
         resnet_v2: bool = True,
+        spatial_size: int = 25,  # Default for 5x5 board
     ):
         resnet_cls = BlockV2 if resnet_v2 else BlockV1
 
@@ -85,8 +88,7 @@ class AZNet(eqx.Module):
             eqx.nn.BatchNorm(2, "batch", momentum=0.9, mode="batch"),
             jax.nn.relu,
             lambda x: x.flatten(),
-            # TODO: infer from inputs
-            eqx.nn.Linear(162, num_actions, key=keys[num_blocks + 2]),
+            eqx.nn.Linear(2 * spatial_size, num_actions, key=keys[num_blocks + 2]),
         ]
 
         self.value_head = [
@@ -94,7 +96,7 @@ class AZNet(eqx.Module):
             eqx.nn.BatchNorm(1, "batch", momentum=0.9, mode="batch"),
             jax.nn.relu,
             lambda x: x.flatten(),
-            eqx.nn.Linear(81, output_channels, key=keys[num_blocks + 2]),
+            eqx.nn.Linear(spatial_size, output_channels, key=keys[num_blocks + 2]),
             jax.nn.relu,
             eqx.nn.Linear(output_channels, 1, key=keys[num_blocks + 2]),
             jnp.tanh,
@@ -120,7 +122,7 @@ class AZNet(eqx.Module):
             else:
                 x = layer(x)
 
-        logits = x.copy()
+        logits = x.copy()  # why copy?
         for layer in self.policy_head:
             if isinstance(layer, eqx.nn.StatefulLayer):
                 logits, state = layer(logits, state)
@@ -135,3 +137,32 @@ class AZNet(eqx.Module):
                 v = layer(v)
 
         return (logits, v), state
+
+
+def create_model(env, config, key) -> Tuple:
+    """Create an Equinox model, initialize """
+    dummy_state = jax.vmap(env.init)(jax.random.split(jax.random.PRNGKey(0), 2))
+    dummy_input = dummy_state.observation
+    input_channels = dummy_input.shape[-1]  # Last dimension is channels
+    spatial_size = dummy_input.shape[1] * dummy_input.shape[2]  # Height * width
+    model_params, model_state = eqx.nn.make_with_state(AZNet)(
+        num_actions=env.num_actions,
+        input_channels=input_channels,
+        output_channels=config.num_channels,
+        num_blocks=config.num_layers,
+        spatial_size=spatial_size,
+        key=key
+    )
+
+    return model_params, model_state
+
+
+def load_from_ckpt(fpath: str) -> Tuple:
+    with open(fpath, "rb") as f:
+        d = pickle.load(f)
+    model_params, model_state = d["model"]
+
+    def forward_fn(model, state, x):
+        return model(x, state)
+
+    return forward_fn, model_params, model_state

@@ -178,7 +178,8 @@ def test_init_save():
     inference_model = eqx.nn.inference_mode(model_params)
     # (logits, value), _ = inference_model(state.observation, model_state)
     # print(value)
-    forward_fn = eqx.filter_jit(model_params)
+    forward_fn = eqx.filter_jit(eqx.filter_vmap(inference_model,
+                                                in_axes=(0, None), out_axes=(0, None), axis_name="batch"))
     (logits, value), _ = forward_fn(state.observation, model_state)
     print(value)
 
