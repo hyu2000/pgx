@@ -246,7 +246,7 @@ def evaluate(rng_key, my_model):
 
 
 def main():
-    wandb.init(project='pgx-az', config=config.model_dump())
+    wandb.init(project=config.wandb_project, config=config.model_dump())
 
     rng_key = jax.random.key(config.seed)
     # Initialize model and opt_state

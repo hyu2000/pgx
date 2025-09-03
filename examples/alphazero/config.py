@@ -23,6 +23,7 @@ class Config(BaseModel):
     eval_interval: int = 5
     eval_batch_size: int = 128  # #games
     checkpoint_interval: int = 5
+    wandb_project: str = "pgx-az"
 
     class Config:
         extra = "forbid"
