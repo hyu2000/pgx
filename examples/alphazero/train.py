@@ -59,9 +59,9 @@ lr_schedule_exp = optax.exponential_decay(
 lr_schedule_cos = optax.cosine_decay_schedule(
     config.learning_rate,
     decay_steps=config.lr_decay_steps,
-    alpha=0.2
+    alpha=0.001
 )
-optimizer = optax.adam(lr_schedule_exp)
+optimizer = optax.adam(lr_schedule_cos)
 
 
 class SelfplayOutput(NamedTuple):
