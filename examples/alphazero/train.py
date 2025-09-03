@@ -56,12 +56,12 @@ lr_schedule_exp = optax.exponential_decay(
     decay_rate=0.5,  # This gives you the same 2^(-e) behavior
     staircase=True   # This gives you the floor behavior
 )
-lr_schedule = optax.cosine_decay_schedule(
+lr_schedule_cos = optax.cosine_decay_schedule(
     config.learning_rate,
     decay_steps=config.lr_decay_steps,
     alpha=0.2
 )
-optimizer = optax.adam(lr_schedule)
+optimizer = optax.adam(lr_schedule_exp)
 
 
 class SelfplayOutput(NamedTuple):
@@ -287,6 +287,7 @@ def main():
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
             # model_0, opt_state_0 = jax.tree_util.tree_map(lambda x: x[0], (train_model, opt_state))
+            # model_0, opt_state_0 = eqx.filter((model, opt_state), eqx.is_array)
             model_0, opt_state_0 = model, opt_state
             with open(os.path.join(ckpt_dir, f"{iteration:06d}.ckpt"), "wb") as f:
                 dic = {
