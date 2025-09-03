@@ -163,14 +163,19 @@ class Sample(NamedTuple):
 def compute_loss_input(data: SelfplayOutput) -> Sample:
     batch_size = config.selfplay_batch_size // num_devices
     # If episode is truncated, there is no value target
-    # So when we compute value loss, we need to mask it
+    # auto-reset: the next init state kept the previous terminated/truncated/rewards
+    # So when we compute value loss, we need to mask it (value_mask=0 means not using it)
     value_mask = jnp.cumsum(data.terminated[::-1, :], axis=0)[::-1, :] >= 1
 
     # Compute value target
+    # discount=-1 except 0 for terminated
+    # Be aware of off-by-1 error: rewards are stored at the next init state due to auto-reset, but next init-state shouldn't get that reward
+    # The bug affects value_tgt for init states
     def body_fn(carry, i):
         ix = config.max_num_steps - i - 1
-        v = data.reward[ix] + data.discount[ix] * carry
-        return v, v
+        v = -1 * carry
+        carry = data.reward[ix] + data.discount[ix] * carry
+        return carry, v
 
     _, value_tgt = jax.lax.scan(
         body_fn,
