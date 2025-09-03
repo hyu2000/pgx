@@ -79,12 +79,39 @@ def test_run_game_mctx_hk():
 
 def load_go5_checkpoint_eqx():
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
-    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-161225/000010.ckpt'
-    # fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-163535/000010.ckpt'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-161225/000050.ckpt'
     model_params, model_state = load_from_ckpt(fpath)
     model_params = eqx.nn.inference_mode(model_params)
     batch_forward = get_batch_forward_fn(model_params, model_state)
     return batch_forward, model_params, model_state
+
+
+def test_load_colab_ckpt():
+    """ debug why we cannot run colab ckpt model locally """
+    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-161225/000070.ckpt'
+    # fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-163535/000010.ckpt'
+
+    key = jax.random.PRNGKey(0)
+    with open(fpath, "rb") as f:
+        d = pickle.load(f)
+    env = pgx.make(d['env_id'])
+    config = d['config']
+    init_model = create_model(env, config, key=key)
+    _, static = eqx.partition(init_model, eqx.is_array)
+
+    model_arr, _ = eqx.partition(d['model'], eqx.is_array)
+    model_params, model_state = eqx.combine(model_arr, static)
+    batch_forward = get_batch_forward_fn(model_params, model_state)
+
+    batch_size = 2
+    keys = jax.random.split(key, batch_size)
+    init_fn = jax.jit(jax.vmap(env.init))
+    state = init_fn(keys)
+    print(state.observation.shape)
+    (logits, values), _ = batch_forward(state.observation)
+    print(values)
+
 
 
 def test_run_game_mctx_eqx():
@@ -100,7 +127,7 @@ def test_run_game_mctx_eqx():
     recur_fn = mctx_search.make_recurrent_fn(batch_forward, env.step)
 
     history = []
-    batch_size = 2
+    batch_size = 5
     rng_key, key2 = jax.random.split(rng_key)
     keys = jax.random.split(key2, batch_size)
     state = init_fn(keys)
@@ -109,7 +136,7 @@ def test_run_game_mctx_eqx():
     while not (state.terminated | state.truncated).all():
         # (logits, value), _ = model_param(state.observation, model_state)
         rng_key, key2 = jax.random.split(rng_key)
-        policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=2)
+        policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=32)
         action = policy_output.action
         state = step_fn(state, action)
         history.append(state)

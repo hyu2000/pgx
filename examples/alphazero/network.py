@@ -157,10 +157,27 @@ def create_model(env, config, key) -> Tuple:
     return model_params, model_state
 
 
-def load_from_ckpt(fpath: str) -> Tuple:
+def load_from_ckpt(fpath: str, simple: bool = False) -> Tuple:
     with open(fpath, "rb") as f:
         d = pickle.load(f)
-    model_params, model_state = d["model"]
+
+    if simple:
+        model_params, model_state = d["model"]
+        return model_params, model_state
+
+    """ only use arr part of ckpt (potentially due to python 3.12 on colab != 3.11 locally """
+    import pgx
+    with open(fpath, "rb") as f:
+        d = pickle.load(f)
+
+    env = pgx.make(d['env_id'])
+    config = d['config']
+    key = jax.random.PRNGKey(config.seed)
+    init_model = create_model(env, config, key=key)
+
+    _, static    = eqx.partition(init_model, eqx.is_array)
+    model_arr, _ = eqx.partition(d['model'], eqx.is_array)
+    model_params, model_state = eqx.combine(model_arr, static)
     return model_params, model_state
 
 
