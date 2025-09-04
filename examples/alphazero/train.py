@@ -238,7 +238,7 @@ def evaluate(rng_key, my_model):
             state.observation, my_model_state
         )
         opp_logits, _ = baseline(state.observation)
-        is_my_turn = (state.current_player == my_player)  # .reshape((-1, 1))
+        is_my_turn = (state.current_player == my_player).reshape((-1, 1))
         logits = jnp.where(is_my_turn, my_logits, opp_logits)
         key, subkey = jax.random.split(key)
         action = jax.random.categorical(subkey, logits, axis=-1)
