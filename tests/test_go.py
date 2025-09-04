@@ -49,7 +49,7 @@ def test_batch_init():
     states = init(keys)
     print(type(states))  # dataclass, pytree
     print(states._x.color)
-    print(states.current_player)
+    print('current_player:', states.current_player)
 
 
 def test_no_jit():

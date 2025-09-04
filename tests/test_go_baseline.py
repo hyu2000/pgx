@@ -77,9 +77,12 @@ def test_run_game_mctx_hk():
     pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
 
 
-def load_go5_checkpoint_eqx():
-    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
-    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-161225/000050.ckpt'
+def load_go5_checkpoint_eqx(fpath = None):
+    if not fpath:
+        fpath = f'go_5x5C2_250903-143719/000210.ckpt'
+    if not fpath.startswith('/'):
+        CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+        fpath = f'{CHECKPOINT_DIR}/{fpath}'
     model_params, model_state = load_from_ckpt(fpath)
     model_params = eqx.nn.inference_mode(model_params)
     batch_forward = get_batch_forward_fn(model_params, model_state)
@@ -113,7 +116,6 @@ def test_load_colab_ckpt():
     print(values)
 
 
-
 def test_run_game_mctx_eqx():
     env_id = "go_5x5C2"
     rng_key = jax.random.PRNGKey(1)
@@ -124,7 +126,8 @@ def test_run_game_mctx_eqx():
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
-    recur_fn = mctx_search.make_recurrent_fn(batch_forward, env.step)
+    # recur_fn = mctx_search.make_recurrent_fn(batch_forward, env.step)
+    batch_fwd_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=32)
 
     history = []
     batch_size = 5
@@ -136,7 +139,8 @@ def test_run_game_mctx_eqx():
     while not (state.terminated | state.truncated).all():
         # (logits, value), _ = model_param(state.observation, model_state)
         rng_key, key2 = jax.random.split(rng_key)
-        policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=32)
+        # policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=32)
+        policy_output = batch_fwd_mcts(state, key2)
         action = policy_output.action
         state = step_fn(state, action)
         history.append(state)
@@ -214,6 +218,25 @@ def test_init_save():
     print(value)
 
 
+def test_myeqx_net():
+    from examples.alphazero.network_myeqx import create_model
+    from examples.alphazero.config import Config
+
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+    config = Config()
+    model_params, model_state = create_model(env, config, key=key)
+    print(model_params)
+
+    batch_size = 2
+    keys = jax.random.split(key, batch_size)
+    init_fn = jax.jit(jax.vmap(env.init))
+    state = init_fn(keys)
+    print(state.observation.shape)
+
+    (logits, value), _ = model_params(state.observation, model_state)
+    print(value)
+
 
 def test_play_random_model():
     """ random play on go5CX2 """
@@ -248,3 +271,64 @@ def test_play_random_model():
 
     print('Total #states =', len(states))
     pgx.save_svg_animation(states, f"{env_id}.svg", frame_duration_seconds=1)
+
+
+def test_mcts_policy():
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    batch_size = 2
+    key, key2 = jax.random.split(key, 2)
+    keys = jax.random.split(key, batch_size)
+    init_fn = jax.jit(jax.vmap(env.init))
+    step_fn = jax.jit(jax.vmap(env.step))
+    state = init_fn(keys)
+
+    batch_forward, model_params, model_state = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
+    batch_forward_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=32)
+    for i in range(5):
+        policy_output = batch_forward_mcts(state, key)
+        print(policy_output.action)
+        state = step_fn(state, policy_output.action)
+        # print(state.observation.shape)
+
+
+@eqx.filter_jit
+def evaluate(env, rng_key, num_games, batch_mcts1, batch_mcts2):
+    """
+    """
+    my_player = 0
+
+    key, subkey = jax.random.split(rng_key)
+    batch_size = num_games
+    keys = jax.random.split(subkey, batch_size)
+    state = jax.vmap(env.init)(keys)
+
+    def body_fn(val):
+        key, state, R = val
+
+        key, subkey1, subkey2 = jax.random.split(key, 3)
+        policy_output1 = batch_mcts1(state, subkey1)
+        policy_output2 = batch_mcts2(state, subkey2)
+        is_my_turn = state.current_player == my_player  #).reshape((-1, 1))
+        # logits = jnp.where(is_my_turn, logits1, opp_logits)
+        # action = jax.random.categorical(subkey, logits, axis=-1)
+        action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
+        state = jax.vmap(env.step)(state, action)
+        R = R + state.rewards[jnp.arange(batch_size), my_player]
+        return (key, state, R)
+
+    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
+    return R
+
+
+def test_run_eval():
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
+    batch_forward_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=1)
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
+    batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=32)
+    R = evaluate(env, key, 32, batch_forward_mcts1, batch_forward_mcts2)
+    print(R, sum(R) / len(R))

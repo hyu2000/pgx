@@ -13,10 +13,10 @@ def make_recurrent_fn(forward_fn, env_step):
     """
 
     def recurrent_fn(inference_model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
-        """
+        """ per mctx spec
         """
         del rng_key
-        model_param, model_state = inference_model
+        # model_param, model_state = inference_model
 
         current_player = state.current_player
         state = jax.vmap(env_step)(state, action)
@@ -47,7 +47,7 @@ def make_recurrent_fn(forward_fn, env_step):
 # if we jit this func, num_simulation needs to be marked as static. If instead we want to jit its callers,
 # how do we mark this static_arg? In a big project, there are lots of args sprinkled around that are configs
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
-    model_params, model_state = model
+    # model_params, model_state = model
     (logits, value), _ = forward_apply(state.observation)
     root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
 
@@ -65,3 +65,18 @@ def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key,
         gumbel_scale=1.0,
     )
     return policy_output
+
+
+def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulation: int = 32):
+    """ return a new batch_fwd function, which has a simple signature:
+    - params: env state, plus an extra rng_key (for mctx)
+    - returns mctx.PolicyOutput
+    """
+
+    recur_fn = make_recurrent_fn(batch_forward, batch_env_step)
+
+    def batch_fwd_mcts(state, rng_key):
+        policy_output = improve_policy_with_mcts(batch_forward, recur_fn, None, state, rng_key, num_simulations=num_simulation)
+        return policy_output
+
+    return batch_fwd_mcts
