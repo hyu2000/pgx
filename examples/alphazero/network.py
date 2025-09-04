@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 
 
-BN_KWARGS = dict(momentum=0.9, mode="batch")
+BN_KWARGS = dict(momentum=0.99, mode="batch")
 
 
 class BlockV1(eqx.Module):
