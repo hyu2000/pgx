@@ -10,6 +10,8 @@ class Config(BaseModel):
     num_channels: int = 64  # 128
     num_layers: int = 6
     resnet_v2: bool = True
+    bn_momentum: float = 0.9
+    bn_mode: str = 'batch'
     # selfplay params
     selfplay_batch_size: int = 512   # #games
     num_simulations: int = 32

@@ -8,9 +8,6 @@ import jax
 import jax.numpy as jnp
 
 
-BN_KWARGS = dict(momentum=0.9, mode="batch")
-
-
 class BlockV1(eqx.Module):
     conv1: eqx.nn.Conv2d
     conv2: eqx.nn.Conv2d
@@ -40,7 +37,9 @@ class BlockV2(eqx.Module):
     norm1: eqx.nn.BatchNorm
     norm2: eqx.nn.BatchNorm
 
-    def __init__(self, in_channels, out_channels, key):
+    def __init__(self, in_channels, out_channels, key, bn_momentum: float = 0.9, bn_mode = 'batch'):
+        BN_KWARGS = dict(momentum=bn_momentum, mode=bn_mode)
+
         keys = jax.random.split(key, 2)
         self.conv1 = eqx.nn.Conv2d(in_channels, out_channels, padding="SAME", kernel_size=3, key=keys[0])
         self.conv2 = eqx.nn.Conv2d(out_channels, out_channels, padding="SAME", kernel_size=3, key=keys[1])
@@ -75,14 +74,18 @@ class AZNet(eqx.Module):
         num_blocks: int = 5,
         resnet_v2: bool = True,
         spatial_size: int = 25,  # Default for 5x5 board
+        bn_momentum: float = 0.9,
+        bn_mode = 'batch'
     ):
         resnet_cls = BlockV2 if resnet_v2 else BlockV1
+        BN_KWARGS = dict(momentum=bn_momentum, mode=bn_mode)
 
         keys = jax.random.split(key, num_blocks + 5)
         self.init_layers = [eqx.nn.Conv2d(input_channels, output_channels, kernel_size=3, padding="SAME", key=keys[0])]
         if not resnet_v2:
             self.init_layers += [eqx.nn.BatchNorm(output_channels, "batch", **BN_KWARGS), jax.nn.relu]
-        self.resnet = [resnet_cls(output_channels, output_channels, keys[i + 1]) for i in range(num_blocks)]
+        self.resnet = [resnet_cls(output_channels, output_channels, keys[i + 1], bn_momentum=bn_momentum, bn_mode=bn_mode)
+                       for i in range(num_blocks)]
         self.post_resnet = []
         if resnet_v2:
             self.post_resnet += [eqx.nn.BatchNorm(output_channels, "batch", **BN_KWARGS), jax.nn.relu]
@@ -154,6 +157,8 @@ def create_model(env, config, key) -> Tuple:
         output_channels=config.num_channels,
         num_blocks=config.num_layers,
         spatial_size=spatial_size,
+        bn_momentum=config.bn_momentum,
+        bn_mode=config.bn_mode,
         key=key
     )
 

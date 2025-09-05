@@ -331,4 +331,5 @@ def test_run_eval():
     batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
     batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=32)
     R = evaluate(env, key, 32, batch_forward_mcts1, batch_forward_mcts2)
-    print(R, sum(R) / len(R))
+    print(R)
+    print(f'Total {len(R)} games, win-rate=', sum(R) / len(R))
