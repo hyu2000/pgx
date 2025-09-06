@@ -33,7 +33,7 @@ from omegaconf import OmegaConf
 from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
 import equinox as eqx
-from examples.alphazero.network import create_model
+from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -59,7 +59,7 @@ lr_schedule_exp = optax.exponential_decay(
 lr_schedule_cos = optax.cosine_decay_schedule(
     config.learning_rate,
     decay_steps=config.lr_decay_steps,
-    alpha=0.001
+    alpha=0.005
 )
 optimizer = optax.adam(lr_schedule_cos)
 
