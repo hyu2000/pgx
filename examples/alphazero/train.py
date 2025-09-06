@@ -34,6 +34,7 @@ from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
 import equinox as eqx
 from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn
+from examples.alphazero import mctx_search
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -44,6 +45,15 @@ print(config)
 
 env = pgx.make(config.env_id)
 
+
+def get_batch_fwd_mcts_for_model(model, num_simulations: int):
+    model_params, model_state = model
+    model_params = eqx.nn.inference_mode(model_params)
+    batch_forward = get_batch_forward_fn(model_params, model_state)
+    batch_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=num_simulations)
+    return batch_mcts
+
+
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
 if not config.baseline:
@@ -53,8 +63,7 @@ if not config.baseline:
 else:
     baseline_id = config.baseline
     baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
-    baseline_fwd = get_batch_forward_fn(*baseline_model)
-    baseline = lambda x: baseline_fwd(x)[0]
+    baseline_mcts = get_batch_fwd_mcts_for_model(baseline_model, config.num_simulations)
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -226,8 +235,36 @@ def train(model, opt_state, data: Sample):
     return model, opt_state, policy_loss, value_loss
 
 
+@eqx.filter_jit
+def evaluate(rng_key, my_model, baseline_mcts, num_games: int):
+    """
+    """
+    my_player = 0
+    my_batch_mcts = get_batch_fwd_mcts_for_model(my_model, config.num_simulations)
+
+    key, subkey = jax.random.split(rng_key)
+    batch_size = num_games
+    keys = jax.random.split(subkey, batch_size)
+    state = jax.vmap(env.init)(keys)
+
+    def body_fn(val):
+        key, state, R = val
+
+        key, subkey1, subkey2 = jax.random.split(key, 3)
+        policy_output1 = my_batch_mcts(state, subkey1)
+        policy_output2 = baseline_mcts(state, subkey2)
+        is_my_turn = state.current_player == my_player
+        action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
+        state = jax.vmap(env.step)(state, action)
+        R = R + state.rewards[jnp.arange(batch_size), my_player]
+        return (key, state, R)
+
+    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
+    return R
+
+
 @partial(eqx.filter_pmap, in_axes=(0, None))
-def evaluate(rng_key, my_model):
+def evaluate_no_mcts_tbd(rng_key, my_model):
     """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
     my_player = 0
@@ -285,8 +322,7 @@ def main():
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
-            keys = jax.random.split(subkey, num_devices)
-            R = evaluate(keys, model)
+            R = evaluate(subkey, model, baseline_mcts, config.eval_batch_size)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
