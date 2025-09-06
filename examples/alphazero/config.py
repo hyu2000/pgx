@@ -17,13 +17,14 @@ class Config(BaseModel):
     num_simulations: int = 32
     max_num_steps: int = 64  # max_num_moves per game
     # training params
-    training_batch_size: int = 4096   # #samples per batch
+    training_batch_size: int = 256   # #samples per mini-batch
     learning_rate: float = 0.01
     lr_decay_steps: int = 256  # halve LR every #steps
     weight_decay: float = 1e-4
     # eval params
     eval_interval: int = 5
     eval_batch_size: int = 128  # #games
+    baseline: str = 'go_5x5C2_250906-125418/000075.ckpt'
     checkpoint_interval: int = 5
     wandb_project: str = "pgx-az"
 

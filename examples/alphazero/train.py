@@ -46,8 +46,15 @@ env = pgx.make(config.env_id)
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-baseline_id = 'go_5x5C2_250722-193343/000200'
-baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
+if not config.baseline:
+    # haiku models
+    baseline_id = 'go_5x5C2_250722-193343/000200'
+    baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
+else:
+    baseline_id = config.baseline
+    baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
+    baseline_fwd = get_batch_forward_fn(*baseline_model)
+    baseline = lambda x: baseline_fwd(x)[0]
 
 
 lr_schedule_exp = optax.exponential_decay(
