@@ -235,7 +235,7 @@ def train(model, opt_state, data: Sample):
     return model, opt_state, policy_loss, value_loss
 
 
-@eqx.filter_jit
+@partial(eqx.filter_pmap, in_axes=(0, None, None, None))
 def evaluate(rng_key, my_model, baseline_mcts, num_games: int):
     """
     """
@@ -322,7 +322,8 @@ def main():
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
-            R = evaluate(subkey, model, baseline_mcts, config.eval_batch_size)
+            keys = jax.random.split(subkey, num_devices)
+            R = evaluate(keys, model, baseline_mcts, config.eval_batch_size)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
