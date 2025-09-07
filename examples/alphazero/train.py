@@ -63,6 +63,8 @@ if not config.baseline:
 else:
     baseline_id = config.baseline
     baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
+    baseline_fwd = get_batch_forward_fn(*baseline_model)
+    baseline = lambda x: baseline_fwd(x)[0]
     baseline_mcts = get_batch_fwd_mcts_for_model(baseline_model, config.num_simulations)
 
 
@@ -264,7 +266,7 @@ def evaluate(rng_key, my_model, baseline_mcts, num_games: int):
 
 
 @partial(eqx.filter_pmap, in_axes=(0, None))
-def evaluate_no_mcts_tbd(rng_key, my_model):
+def evaluate_no_mcts(rng_key, my_model):
     """A simplified evaluation by sampling. Only for debugging.
     Please use MCTS and run tournaments for serious evaluation."""
     my_player = 0
@@ -321,13 +323,16 @@ def main():
     while True:
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
-            rng_key, subkey = jax.random.split(rng_key)
+            rng_key, subkey, subkey2 = jax.random.split(rng_key, 3)
             keys = jax.random.split(subkey, num_devices)
-            R = evaluate(keys, model, baseline_mcts, config.eval_batch_size)
+            keys2 = jax.random.split(subkey2, num_devices)
+            R = evaluate_no_mcts(keys, model)
+            R_mcts = evaluate(keys2, model, baseline_mcts, config.eval_batch_size)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
                     f"eval/vs_baseline/win_rate": ((R == 1).sum() / R.size).item(),
+                    f"eval/vs_mcts/win_rate": ((R_mcts == 1).sum() / R_mcts.size).item(),
                     f"eval/vs_baseline/draw_rate": ((R == 0).sum() / R.size).item(),
                     # f"eval/vs_baseline/lose_rate": ((R == -1).sum() / R.size).item(),
                 }
