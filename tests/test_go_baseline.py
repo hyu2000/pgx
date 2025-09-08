@@ -294,7 +294,7 @@ def test_mcts_policy():
 
 
 @eqx.filter_jit
-def evaluate(env, rng_key, num_games, batch_mcts1, batch_mcts2):
+def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
     """
     """
     my_player = 0
@@ -308,12 +308,12 @@ def evaluate(env, rng_key, num_games, batch_mcts1, batch_mcts2):
         key, state, R, action_history = val
 
         key, subkey1, subkey2 = jax.random.split(key, 3)
-        policy_output1 = batch_mcts1(state, subkey1)
-        policy_output2 = batch_mcts2(state, subkey2)
+        policy_output1 = batch_policy1(state, subkey1)
+        policy_output2 = batch_policy2(state, subkey2)
         is_my_turn = state.current_player == my_player  #).reshape((-1, 1))
         step_count = state._step_count[0]  # need a single int!
         # policy_output.action_weights   is action guaranteed to be the argmax?
-        action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
+        action = jnp.where(is_my_turn, policy_output1, policy_output2)
         state = jax.vmap(env.step)(state, action)
         R = R + state.rewards[jnp.arange(batch_size), my_player]
         action_history = action_history.at[:, step_count].set(action)
@@ -355,12 +355,14 @@ def test_run_eval():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    num_simulations = 2
+    num_simulations = 1
     batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000100.ckpt')
     batch_forward_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=num_simulations)
+    batch_forward1 = mctx_search.batch_fwd_mcts_to_policy(batch_forward_mcts1)
     batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
     batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=1)
-    R, actions = evaluate(env, key, 2, batch_forward_mcts1, batch_forward_mcts2)
+    batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(batch_forward_mcts2)
+    R, actions = evaluate(env, key, 2, batch_forward1, batch_forward_mcts2)
     print(R)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
     print(actions)

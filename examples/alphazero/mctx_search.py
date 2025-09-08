@@ -72,7 +72,6 @@ def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulation: int = 32):
     - params: env state, plus an extra rng_key (for mctx)
     - returns mctx.PolicyOutput
     """
-
     recur_fn = make_recurrent_fn(batch_forward, batch_env_step)
 
     def batch_fwd_mcts(state, rng_key):
@@ -80,3 +79,9 @@ def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulation: int = 32):
         return policy_output
 
     return batch_fwd_mcts
+
+
+def batch_fwd_mcts_to_policy(batch_fwd_mcts):
+    def policy_fn(state, rng_key):
+        return batch_fwd_mcts(state, rng_key).action
+    return policy_fn
