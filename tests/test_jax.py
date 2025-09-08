@@ -1,6 +1,7 @@
 from typing import NamedTuple
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 
 
 @jax.jit
@@ -87,6 +88,21 @@ def test_filter_pytree():
     print(x_filtered)
 
 
+def test_jnp_set():
+    """ very confusing and subtle bug """
+    x = jnp.ones((2, 3))
+    action0 = jnp.array([1, 2])
+    # this creates a view where x[:, 0] is dup'ed, then action0 is broadcasted to match, written twice --> 2, 2
+    x = x.at[:, [0, 0]].set(action0)
+    # the right way
+    x = x.at[:, 1].set(action0)
+    x = x.at[:, 2].set(-1)
+    # invalid indexing silently ignored!
+    x = x.at[:, 5].set(-2)
+    print()
+    print(x)
+
+
 def test_jnp_indexing():
     key = jax.random.PRNGKey(0)
     x = jax.random.normal(key, (4, 2))
@@ -103,3 +119,54 @@ def test_cumsum():
     value_mask = jnp.cumsum(terminated[::-1, :], axis=0)[::-1, :] >= 1
     print()
     print(value_mask)
+
+
+def eval(x, str_arg: str):
+    print('str_arg')  # side-effect
+    if str_arg == 'a':
+        return x + 3
+    else:
+        return x - 3
+
+
+def test_rejit():
+    x = jnp.arange(3)
+    jit_eval = eqx.filter_jit(eval)
+    print(jit_eval(x, 'a'))
+    print(jit_eval(x, 'b'))
+    print(jit_eval(x - 3, 'a'))
+
+
+def make_fwd_fn(m):
+    def fwd(x):
+        print('jitting fwd')
+        return m + x
+    return fwd
+
+
+@eqx.filter_jit
+def evaluate(fwd_fn, x):
+    print('jitting evaluate')
+    return fwd_fn(x)
+
+
+def test_closure_as_pytree():
+    """ although conceptually closure is a function w/ data attached,
+    this is not so to jax. It's not transparent, just a function
+    """
+    fwd_fn = make_fwd_fn(jnp.arange(3))
+    print(fwd_fn(5))
+    print(fwd_fn(-5))
+    arrays, treedef = jax.tree.flatten_with_path(fwd_fn)
+    for kp, value in arrays:
+        print(f'path={kp} type={type(value)}')
+
+
+def test_jit_evaluate():
+    fwd_fn = make_fwd_fn(jnp.arange(3))
+    x = 5.0
+    evaluate(fwd_fn, x)
+    fwd_fn2 = make_fwd_fn(jnp.arange(3) * 2)
+    # eqx.filter_jit treats fwd_fn as static arg, so re-jit everything
+    # We could've avoided this by explicitly passing in the plain fwd_fn and model_params as arrays
+    evaluate(fwd_fn2, x)

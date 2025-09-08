@@ -80,6 +80,7 @@ def test_run_game_mctx_hk():
 def load_go5_checkpoint_eqx(fpath = None):
     if not fpath:
         fpath = f'go_5x5C2_250903-143719/000210.ckpt'
+        fpath = 'go_5x5C2_250906-125418/000075.ckpt'  # mini-batch new baseline
     if not fpath.startswith('/'):
         CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
         fpath = f'{CHECKPOINT_DIR}/{fpath}'
@@ -121,8 +122,7 @@ def test_run_game_mctx_eqx():
     rng_key = jax.random.PRNGKey(1)
     env = pgx.make(env_id)
 
-    batch_forward, model_param, model_state = load_go5_checkpoint_eqx()
-    model = (model_param, model_state)
+    batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
@@ -305,31 +305,62 @@ def evaluate(env, rng_key, num_games, batch_mcts1, batch_mcts2):
     state = jax.vmap(env.init)(keys)
 
     def body_fn(val):
-        key, state, R = val
+        key, state, R, action_history = val
 
         key, subkey1, subkey2 = jax.random.split(key, 3)
         policy_output1 = batch_mcts1(state, subkey1)
         policy_output2 = batch_mcts2(state, subkey2)
         is_my_turn = state.current_player == my_player  #).reshape((-1, 1))
-        # logits = jnp.where(is_my_turn, logits1, opp_logits)
-        # action = jax.random.categorical(subkey, logits, axis=-1)
+        step_count = state._step_count[0]  # need a single int!
+        # policy_output.action_weights   is action guaranteed to be the argmax?
         action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
         state = jax.vmap(env.step)(state, action)
         R = R + state.rewards[jnp.arange(batch_size), my_player]
-        return (key, state, R)
+        action_history = action_history.at[:, step_count].set(action)
+        return (key, state, R, action_history)
 
-    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
-    return R
+    action_history_init = jnp.ones((batch_size, 50)) * -1
+    action_history_init = action_history_init.at[:, 0].set(17)  # C2
+    _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
+                                                 (key, state, jnp.zeros(batch_size), action_history_init))
+    return R, action_history
+
+
+def test_debug_eval():
+    """
+# gen100 wrate against baseline (glorius-yogurt): 69% (policy sampling), 44% (#simu=32)
+mctx is deterministic:
+both num_simulations=1: Total 64 games, win-rate= 0.421875
+but policy-only is 69%
+
+against fixed baseline #simu=1:
+num_simulations=16: Total 64 games, win-rate= 0.671875
+num_simulations=32: Total 64 games, win-rate= 0.65625
+num_simulations=64: Total 64 games, win-rate= 0.78125
+    """
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000100.ckpt')
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
+    for num_simulations in (16, 16, 32, 64,):
+        batch_forward_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=num_simulations)
+        batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=1)
+        R = evaluate(env, key, 64, batch_forward_mcts1, batch_forward_mcts2)
+
+        print(f'{num_simulations=}: Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
 
 def test_run_eval():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
-    batch_forward_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=1)
-    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
-    batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=32)
-    R = evaluate(env, key, 32, batch_forward_mcts1, batch_forward_mcts2)
+    num_simulations = 2
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000100.ckpt')
+    batch_forward_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=num_simulations)
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
+    batch_forward_mcts2 = mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=1)
+    R, actions = evaluate(env, key, 2, batch_forward_mcts1, batch_forward_mcts2)
     print(R)
-    print(f'Total {len(R)} games, win-rate=', sum(R) / len(R))
+    print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
+    print(actions)
