@@ -180,6 +180,10 @@ def load_from_ckpt(fpath: str, simple: bool = False) -> Tuple[Any, Any]:
 
     env = pgx.make(d['env_id'])
     config = d['config']
+    # if 'bn_momentum' not in config:
+    #     from examples.alphazero.config import Config
+    #     config = Config(**config.model_dump())
+    #     config.bn_momentum = 0.8 if 'go_5x5C2_250904-193634' in fpath else 0.9
     key = jax.random.PRNGKey(config.seed)
     init_model = create_model(env, config, key=key)
 
@@ -195,3 +199,16 @@ def get_batch_forward_fn(model_params, model_state):
             x, model_state
         )
     return batch_forward
+
+
+def batch_forward_to_policy(batch_fwd_fn):
+    """ this is to conform with evaluate(), to have the same signature as the mcts policy version
+
+    action is sampled from logits
+    """
+    def policy_fn(state, rng_key):
+        (logits, value), _ = batch_fwd_fn(state.observation)
+        action = jax.random.categorical(rng_key, logits, axis=-1)
+        return action
+
+    return policy_fn
