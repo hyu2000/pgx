@@ -33,7 +33,7 @@ from omegaconf import OmegaConf
 from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
 import equinox as eqx
-from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn
+from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
 
 devices = jax.local_devices()
@@ -50,22 +50,18 @@ def get_batch_fwd_mcts_for_model(model, num_simulations: int):
     model_params, model_state = model
     model_params = eqx.nn.inference_mode(model_params)
     batch_forward = get_batch_forward_fn(model_params, model_state)
-    batch_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=num_simulations)
-    return batch_mcts
+
+    batch_policy = batch_forward_to_policy(batch_forward)
+    batch_mcts_policy = mctx_search.batch_fwd_mcts_to_policy(mctx_search.get_batch_fwd_mcts(
+        batch_forward, env.step, num_simulations=num_simulations))
+    return batch_policy, batch_mcts_policy
 
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-if not config.baseline:
-    # haiku models
-    baseline_id = 'go_5x5C2_250722-193343/000200'
-    baseline = pgx.make_baseline_model(config.env_id + "_v0", f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
-else:
-    baseline_id = config.baseline
-    baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
-    baseline_fwd = get_batch_forward_fn(*baseline_model)
-    baseline = lambda x: baseline_fwd(x)[0]
-    baseline_mcts = get_batch_fwd_mcts_for_model(baseline_model, config.num_simulations)
+baseline_id = config.baseline
+baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
+baseline_raw, baseline_mcts = get_batch_fwd_mcts_for_model(baseline_model, config.num_simulations)
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -237,12 +233,11 @@ def train(model, opt_state, data: Sample):
     return model, opt_state, policy_loss, value_loss
 
 
-@partial(eqx.filter_pmap, in_axes=(0, None, None, None))
-def evaluate(rng_key, my_model, baseline_mcts, num_games: int):
+@eqx.filter_jit
+def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
     """
     """
     my_player = 0
-    my_batch_mcts = get_batch_fwd_mcts_for_model(my_model, config.num_simulations)
 
     key, subkey = jax.random.split(rng_key)
     batch_size = num_games
@@ -250,50 +245,25 @@ def evaluate(rng_key, my_model, baseline_mcts, num_games: int):
     state = jax.vmap(env.init)(keys)
 
     def body_fn(val):
-        key, state, R = val
+        key, state, R, action_history = val
 
         key, subkey1, subkey2 = jax.random.split(key, 3)
-        policy_output1 = my_batch_mcts(state, subkey1)
-        policy_output2 = baseline_mcts(state, subkey2)
-        is_my_turn = state.current_player == my_player
-        action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
+        policy_output1 = batch_policy1(state, subkey1)
+        policy_output2 = batch_policy2(state, subkey2)
+        is_my_turn = state.current_player == my_player  #).reshape((-1, 1))
+        step_count = state._step_count[0]  # need a single int!
+        # policy_output.action_weights   is action guaranteed to be the argmax?
+        action = jnp.where(is_my_turn, policy_output1, policy_output2)
         state = jax.vmap(env.step)(state, action)
         R = R + state.rewards[jnp.arange(batch_size), my_player]
-        return (key, state, R)
+        action_history = action_history.at[:, step_count].set(action)
+        return (key, state, R, action_history)
 
-    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
-    return R
-
-
-@partial(eqx.filter_pmap, in_axes=(0, None))
-def evaluate_no_mcts(rng_key, my_model):
-    """A simplified evaluation by sampling. Only for debugging.
-    Please use MCTS and run tournaments for serious evaluation."""
-    my_player = 0
-    my_model, my_model_state = my_model
-    inference_model = eqx.nn.inference_mode(my_model)
-
-    key, subkey = jax.random.split(rng_key)
-    batch_size = config.eval_batch_size // num_devices
-    keys = jax.random.split(subkey, batch_size)
-    state = jax.vmap(env.init)(keys)
-
-    def body_fn(val):
-        key, state, R = val
-        (my_logits, _), _ = eqx.filter_vmap(inference_model, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
-            state.observation, my_model_state
-        )
-        opp_logits, _ = baseline(state.observation)
-        is_my_turn = (state.current_player == my_player).reshape((-1, 1))
-        logits = jnp.where(is_my_turn, my_logits, opp_logits)
-        key, subkey = jax.random.split(key)
-        action = jax.random.categorical(subkey, logits, axis=-1)
-        state = jax.vmap(env.step)(state, action)
-        R = R + state.rewards[jnp.arange(batch_size), my_player]
-        return (key, state, R)
-
-    _, _, R = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn, (key, state, jnp.zeros(batch_size)))
-    return R
+    action_history_init = jnp.ones((batch_size, config.max_num_steps)) * -1
+    action_history_init = action_history_init.at[:, 0].set(17)  # C2
+    _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
+                                                 (key, state, jnp.zeros(batch_size), action_history_init))
+    return R, action_history
 
 
 def main():
@@ -324,10 +294,9 @@ def main():
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey, subkey2 = jax.random.split(rng_key, 3)
-            keys = jax.random.split(subkey, num_devices)
-            keys2 = jax.random.split(subkey2, num_devices)
-            R = evaluate_no_mcts(keys, model)
-            R_mcts = evaluate(keys2, model, baseline_mcts, config.eval_batch_size)
+            batch_raw_policy, batch_forward_mcts = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
+            R, records = evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
+            R_mcts, records = evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),

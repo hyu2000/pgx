@@ -67,7 +67,7 @@ def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key,
     return policy_output
 
 
-def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulation: int = 32):
+def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulations: int = 32):
     """ return a new batch_fwd function, which has a simple signature:
     - params: env state, plus an extra rng_key (for mctx)
     - returns mctx.PolicyOutput
@@ -75,7 +75,7 @@ def get_batch_fwd_mcts(batch_forward, batch_env_step, num_simulation: int = 32):
     recur_fn = make_recurrent_fn(batch_forward, batch_env_step)
 
     def batch_fwd_mcts(state, rng_key):
-        policy_output = improve_policy_with_mcts(batch_forward, recur_fn, None, state, rng_key, num_simulations=num_simulation)
+        policy_output = improve_policy_with_mcts(batch_forward, recur_fn, None, state, rng_key, num_simulations=num_simulations)
         return policy_output
 
     return batch_fwd_mcts
