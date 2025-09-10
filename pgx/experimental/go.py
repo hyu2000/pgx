@@ -45,3 +45,11 @@ def from_sgf(sgf: str):
         if has_branch:
             return state
     return state
+
+
+def from_sgf_file(fname):
+    with open(fname, 'r') as f:
+        contents = f.readlines()
+    s = ''.join(contents)
+    state = from_sgf(s)
+    return state

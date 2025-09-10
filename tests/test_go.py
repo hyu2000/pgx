@@ -5,7 +5,7 @@ import numpy as np
 
 from pgx._src.games.go import _count_ji, _count_scores
 from pgx.go import Go, State
-from pgx.experimental.go import from_sgf
+from pgx.experimental.go import from_sgf, from_sgf_file
 
 
 # only for debug
@@ -45,11 +45,12 @@ def test_batch_init():
     """ game can start with either player 0 or 1 (randomized), as black """
     init = jax.jit(jax.vmap(env.init))
     # keys = jnp.array([jax.random.PRNGKey(i) for i in range(10)])
-    keys = jax.random.split(jax.random.PRNGKey(0), 10)
+    keys = jax.random.split(jax.random.PRNGKey(0), 3)
     states = init(keys)
     print(type(states))  # dataclass, pytree
     print(states._x.color)
     print('current_player:', states.current_player)
+    print(states._step_count)
 
 
 def test_no_jit():
@@ -128,21 +129,45 @@ def test_go5C2env_reward():
 
     keys = jax.random.split(key, 2)
     states0 = init(keys)
-    print('white to move, player_id = ', states0.current_player)
+    # open_move is not counted in _step_count
+    assert (states0._step_count == 0).all()
+    print('white to move, current_player id = ', states0.current_player)
 
     states = states0
     states = step(state=states, action=jnp.array([0, 0]))
+    print('black to move, current_player id = ', states.current_player)
 
     passes = jnp.array([25, 25])
     states = step(state=states, action=passes)
     states = step(state=states, action=passes)
-    print(states.terminated)
+    assert (states.terminated).all()
     print('white reward', states.rewards[jnp.arange(2), states0.current_player])
 
     # after terminal state, terminated == False
     states = step(state=states, action=passes)
     print('pass end-game, terminated=', states.terminated)
     print(states.rewards)
+
+
+def test_C2_komi():
+    """ make sure score counting is as expected
+    """
+    rng_key = jax.random.PRNGKey(0)
+    SGF5_DIR = '/Users/hyu/PycharmProjects/dlgo/go5-intrigues/blog'
+    state = from_sgf_file(f'{SGF5_DIR}/optimalC2.analysis-by-b6elo5k.sgf')
+    assert not state.terminated
+    assert state.current_player == 1   # in sgf, black made the last move, so this is white's player_id
+
+    # state doesn't store komi, so win/loss would be determined by the env when game terminates
+    # komi = 3.5 would flip the result
+    env = Go(size=5, komi=.5)
+    state = env.step(state, 25, rng_key)
+    assert not state.terminated
+    assert state.current_player == 0
+    state = env.step(state, 25, rng_key)
+    assert state.terminated
+    print(state.rewards, state._step_count, state.current_player)
+    assert state.rewards[1] == -1
 
 
 def test_C2jit():
@@ -155,6 +180,7 @@ def test_C2jit():
 
     state0 = init(key=key)
     _show(state0)
+    print(state0._step_count)
     state1 = step(state0, 12)
     _show(state1)
     obs1 = state1.observation.astype(jnp.int8)
