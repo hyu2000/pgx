@@ -208,6 +208,9 @@ def batch_forward_to_policy(batch_fwd_fn):
     """
     def policy_fn(state, rng_key):
         (logits, value), _ = batch_fwd_fn(state.observation)
+        # filter out illegal moves
+        logits = jnp.where(state.legal_action_mask, logits, jnp.finfo(logits.dtype).min)
+
         action = jax.random.categorical(rng_key, logits, axis=-1)
         return action
 

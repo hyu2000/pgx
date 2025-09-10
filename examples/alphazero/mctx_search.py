@@ -44,8 +44,6 @@ def make_recurrent_fn(forward_fn, env_step):
 
 
 @partial(eqx.filter_jit)  #, static_argnums=[0, 1, 5])
-# if we jit this func, num_simulation needs to be marked as static. If instead we want to jit its callers,
-# how do we mark this static_arg? In a big project, there are lots of args sprinkled around that are configs
 def improve_policy_with_mcts(forward_apply, recurrent_fn, model, state, rng_key, num_simulations: int):
     # model_params, model_state = model
     (logits, value), _ = forward_apply(state.observation)
