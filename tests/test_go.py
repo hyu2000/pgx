@@ -161,10 +161,11 @@ def test_C2_komi():
     # state doesn't store komi, so win/loss would be determined by the env when game terminates
     # komi = 3.5 would flip the result
     env = Go(size=5, komi=.5)
-    state = env.step(state, 25, rng_key)
+    env_step = jax.jit(env.step)
+    state = env_step(state, 25, rng_key)
     assert not state.terminated
     assert state.current_player == 0
-    state = env.step(state, 25, rng_key)
+    state = env_step(state, 25, rng_key)
     assert state.terminated
     print(state.rewards, state._step_count, state.current_player)
     assert state.rewards[1] == -1
