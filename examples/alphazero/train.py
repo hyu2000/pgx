@@ -259,10 +259,11 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         action_history = action_history.at[:, step_count].set(action)
         return (key, state, R, action_history)
 
-    action_history_init = jnp.ones((batch_size, config.max_num_steps)) * -1
-    action_history_init = action_history_init.at[:, 0].set(17)  # C2
+    action_history_init = jnp.ones((batch_size, env._game.max_termination_steps)) * -1
     _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
                                                  (key, state, jnp.zeros(batch_size), action_history_init))
+    if env._open_move:
+        action_history = jnp.insert(action_history, 0, env._open_move, axis=1)
     return R, action_history
 
 

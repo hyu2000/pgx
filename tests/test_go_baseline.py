@@ -124,12 +124,11 @@ def test_run_game_mctx_eqx():
     rng_key = jax.random.PRNGKey(1)
     env = pgx.make(env_id)
 
-    batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
+    batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000100.ckpt')
 
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
-    # recur_fn = mctx_search.make_recurrent_fn(batch_forward, env.step)
-    batch_fwd_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=32)
+    batch_fwd_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulations=32)
 
     history = []
     batch_size = 5
@@ -287,7 +286,7 @@ def test_mcts_policy():
     state = init_fn(keys)
 
     batch_forward, model_params, model_state = load_go5_checkpoint_eqx('go_5x5C2_250903-143719/000050.ckpt')
-    batch_forward_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulation=32)
+    batch_forward_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulations=32)
     for i in range(5):
         policy_output = batch_forward_mcts(state, key)
         print(policy_output.action)
@@ -321,20 +320,26 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         action_history = action_history.at[:, step_count].set(action)
         return (key, state, R, action_history)
 
-    action_history_init = jnp.ones((batch_size, 64)) * -1
-    action_history_init = action_history_init.at[:, 0].set(17)  # C2
+    action_history_init = jnp.ones((batch_size, env._game.max_termination_steps)) * -1
     _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
                                                  (key, state, jnp.zeros(batch_size), action_history_init))
+    if env._open_move:
+        action_history = jnp.insert(action_history, 0, env._open_move, axis=1)
     return R, action_history
 
 
-def test_debug_eval():
+def test_reproduce_eval():
     """
 # gen100 wrate against baseline (glorius-yogurt): 69% (policy sampling), 44% (#simu=32)
 mctx is deterministic:
 both num_simulations=1:  Total 64 games, win-rate= 0.421875
 both num_simulations=32: Total 64 games, win-rate= 0.4375
 policy-only is 0.32 ~ 0.40
+
+re-run evaluate under same condition as in train, except for 64 games:
+       gen:            30       40       50         60      70      80        90      100
+raw policy wrates:  ['0.375', '0.688', '0.734', '0.734', '0.688', '0.594', '0.406', '0.328']
+mcts wrates:        ['0.312', '0.906', '0.844', '0.719', '0.703', '0.562', '0.656', '0.438']
 
 against fixed baseline #simu=1:
 num_simulations=16: Total 64 games, win-rate= 0.671875
@@ -344,20 +349,28 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000100.ckpt')
+    num_simulations = 32
+    num_eval_games = 64
     batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
-    batch_policy1 = batch_forward_to_policy(batch_forward1)
     batch_policy2 = batch_forward_to_policy(batch_forward2)
-    for num_simulations in (0, 2, 16, 32,):
+    batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
+        mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
+    wrates_raw, wrates_mcts = [], []
+    for gen1 in range(80, 110, 10):
+        batch_forward1, _, _ = load_go5_checkpoint_eqx(f'go_5x5C2_250909-160146/{gen1:06d}.ckpt')
+        batch_policy1 = batch_forward_to_policy(batch_forward1)
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
-            mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=num_simulations))
-        batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
-            mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=1))
-        if num_simulations == 0:
-            batch_forward_mcts1 = batch_policy1
-        R, actions = evaluate(env, key, 64, batch_forward_mcts1, batch_policy2)
-
-        print(f'{num_simulations=}: Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
+            mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
+        R, actions = evaluate(env, key, num_eval_games, batch_policy1, batch_policy2)
+        wrate = (1 + sum(R) / len(R)) * 0.5
+        print(f'{gen1=}  raw: Total {len(R)} games, win-rate={wrate}')
+        wrates_raw.append(wrate)
+        R, actions = evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+        wrate = (1 + sum(R) / len(R)) * 0.5
+        print(f'{gen1=} mcts: Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
+        wrates_mcts.append(wrate)
+    print('raw policy wrates: ', [f'{x:.3f}' for x in wrates_raw])
+    print('mcts wrates: ', [f'{x:.3f}' for x in wrates_mcts])
 
 
 def test_run_eval():
@@ -365,16 +378,20 @@ def test_run_eval():
     key = jax.random.PRNGKey(0)
 
     num_simulations = 2
-    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000100.ckpt')
+    num_eval_games = 8
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000100.ckpt')
     # batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000050.ckpt')
     batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
-        mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulation=num_simulations))
+        mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
     batch_policy1 = batch_forward_to_policy(batch_forward1)
-    # batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000050.ckpt')
-    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
+    # batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-150643/000100.ckpt')
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
-        mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulation=num_simulations))
+        mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
     batch_policy2 = batch_forward_to_policy(batch_forward2)
-    R, actions = evaluate(env, key, 64, batch_policy1, batch_policy2)
+    R, actions = evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
-    print(actions[:2])
+
+    unique_games, counts = jnp.unique(actions, axis=0, return_counts=True)
+    print(counts)
+    print(unique_games[:6])
