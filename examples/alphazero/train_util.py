@@ -1,13 +1,17 @@
+from typing import Optional
+
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+
+from pgx.experimental import coords
 
 
 @eqx.filter_jit
 def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
     """
     """
-    my_player = 0  # player is randomized at env.init
+    my_player = 0  # player is randomized upon env.init
 
     key, subkey = jax.random.split(rng_key)
     batch_size = num_games
@@ -29,9 +33,44 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         action_history = action_history.at[:, step_count].set(action)
         return (key, state, R, action_history)
 
-    action_history_init = jnp.ones((batch_size, env._game.max_termination_steps), dtype=jnp.int8) * -1
-    _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
-                                                 (key, state, jnp.zeros(batch_size), action_history_init))
+    game_record = jnp.ones((batch_size, env._game.max_termination_steps), dtype=jnp.int8) * -1
+    _, _, R, game_record = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
+                                                 (key, state, jnp.zeros(batch_size), game_record))
     if env._open_move:
-        action_history = jnp.insert(action_history, 0, env._open_move, axis=1)
-    return R, action_history
+        game_record = jnp.insert(game_record, 0, env._open_move, axis=1)
+    # add meta data: which player started the game (as white in Go5C2), my_player (0) win/lose
+    game_record = jnp.insert(game_record, 0, state.current_player, axis=1)
+    game_record = jnp.insert(game_record, 1, R.astype(int), axis=1)
+    return R, game_record
+
+
+def convert_to_black_view(player_to_start, player0_reward, open_move: Optional[int]):
+    """ convert game result from player-centric view to color-centric view
+
+    player_to_start: 0/1
+    player0_reward: 1/-1
+    """
+    black_player_id = player_to_start
+    if open_move is not None:
+        black_player_id = 1 - player_to_start
+
+    if player0_reward == 0:
+        return 'B+T', black_player_id
+
+    black_reward = player0_reward
+    if player_to_start != 0:
+        black_reward *= -1
+    if open_move is not None:
+        black_reward *= -1
+    return ('B+R' if black_reward > 0 else 'W+R'), black_player_id
+
+
+def format_game_records(env, game_records: jnp.array):
+    open_move = env._open_move
+    records = []
+    for game in game_records:
+        game_result, black_player_id = convert_to_black_view(game[0], game[1], open_move)
+        moves_str = ' '.join([coords.arr_to_gtp(game[2:], sgf=True)])
+        s = f'{black_player_id} {game_result} {moves_str}'
+        records.append(s)
+    return records

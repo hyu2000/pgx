@@ -39,6 +39,8 @@ flat            0               18              361
 SGF             'aa'            'sa'            ''
 GTP             'A19'           'T19'           'pass'
 """
+import itertools
+
 import numpy as np
 
 # We provide more than 19 entries here in case of boards larger than 19 x 19.
@@ -97,8 +99,14 @@ def flat_to_gtp(flat: int):
     return to_gtp(from_flat(flat))
 
 
-def arr_to_gtp(arr: np.array):
+def arr_to_gtp(arr: np.array, sgf: bool = False):
     idx_negs = np.where(arr < 0)[0]
     if len(idx_negs) == 0:
         idx_negs = [len(arr)]
-    return ' '.join([flat_to_gtp(i) for i in arr[:idx_negs[0]]])
+    moves = arr[:idx_negs[0]]
+    if sgf:
+        moves = [to_sgf(from_flat(i)) for i in moves]
+        # B[cc];W[cd];
+        sgf_moves = [f'{color}[{m}];' for color, m in zip(itertools.cycle(list('BW')), moves)]
+        return ''.join(sgf_moves)
+    return ' '.join([flat_to_gtp(i) for i in moves])

@@ -10,6 +10,7 @@ import equinox as eqx
 from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
 from examples.alphazero import train_util
+from examples.alphazero.train_util import format_game_records
 
 #from IPython.display import *
 
@@ -356,10 +357,10 @@ def test_run_eval():
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
     batch_policy2 = batch_forward_to_policy(batch_forward2)
-    R, actions = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+    R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
-    unique_games, counts = jnp.unique(actions, axis=0, return_counts=True)
+    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
     print(counts)
-    from pgx.experimental.coords import arr_to_gtp
-    print('\n'.join([arr_to_gtp(arr) for arr in unique_games[:6]]))
+    games_formatted = format_game_records(env, unique_games)
+    print('\n'.join(games_formatted))
