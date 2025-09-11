@@ -24,6 +24,7 @@ import platform
 
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 import mctx
 import optax
 import pgx
@@ -32,9 +33,9 @@ from omegaconf import OmegaConf
 
 from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
-import equinox as eqx
 from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
+from examples.alphazero import train_util
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -233,40 +234,6 @@ def train(model, opt_state, data: Sample):
     return model, opt_state, policy_loss, value_loss
 
 
-@eqx.filter_jit
-def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
-    """
-    """
-    my_player = 0
-
-    key, subkey = jax.random.split(rng_key)
-    batch_size = num_games
-    keys = jax.random.split(subkey, batch_size)
-    state = jax.vmap(env.init)(keys)
-
-    def body_fn(val):
-        key, state, R, action_history = val
-
-        key, subkey1, subkey2 = jax.random.split(key, 3)
-        policy_output1 = batch_policy1(state, subkey1)
-        policy_output2 = batch_policy2(state, subkey2)
-        is_my_turn = state.current_player == my_player  #).reshape((-1, 1))
-        step_count = state._step_count[0]  # need a single int!
-        # policy_output.action_weights   is action guaranteed to be the argmax?
-        action = jnp.where(is_my_turn, policy_output1, policy_output2)
-        state = jax.vmap(env.step)(state, action)
-        R = R + state.rewards[jnp.arange(batch_size), my_player]
-        action_history = action_history.at[:, step_count].set(action)
-        return (key, state, R, action_history)
-
-    action_history_init = jnp.ones((batch_size, env._game.max_termination_steps)) * -1
-    _, _, R, action_history = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
-                                                 (key, state, jnp.zeros(batch_size), action_history_init))
-    if env._open_move:
-        action_history = jnp.insert(action_history, 0, env._open_move, axis=1)
-    return R, action_history
-
-
 def main():
     wandb.init(project=config.wandb_project, config=config.model_dump())
 
@@ -296,8 +263,8 @@ def main():
             # Evaluation
             rng_key, subkey, subkey2 = jax.random.split(rng_key, 3)
             batch_raw_policy, batch_forward_mcts = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
-            R, records = evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
-            R_mcts, records = evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
+            R, records = train_util.evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
+            R_mcts, records = train_util.evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),

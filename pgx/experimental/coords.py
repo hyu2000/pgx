@@ -39,6 +39,7 @@ flat            0               18              361
 SGF             'aa'            'sa'            ''
 GTP             'A19'           'T19'           'pass'
 """
+import numpy as np
 
 # We provide more than 19 entries here in case of boards larger than 19 x 19.
 _SGF_COLUMNS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -94,3 +95,10 @@ def to_gtp(coord):
 
 def flat_to_gtp(flat: int):
     return to_gtp(from_flat(flat))
+
+
+def arr_to_gtp(arr: np.array):
+    idx_negs = np.where(arr < 0)[0]
+    if len(idx_negs) == 0:
+        idx_negs = [len(arr)]
+    return ' '.join([flat_to_gtp(i) for i in arr[:idx_negs[0]]])
