@@ -99,11 +99,23 @@ def flat_to_gtp(flat: int):
     return to_gtp(from_flat(flat))
 
 
-def arr_to_gtp(arr: np.array, sgf: bool = False):
+def locate_game_last_move(arr: np.array) -> int:
+    """ batch-eval produces game records that may contain actions past actual game termination
+
+    returns: idx_last_move + 1 (sentinel)
+    """
     idx_negs = np.where(arr < 0)[0]
-    if len(idx_negs) == 0:
-        idx_negs = [len(arr)]
-    moves = arr[:idx_negs[0]]
+    idx_sentinel = len(arr)
+    if len(idx_negs) > 0:
+        idx_sentinel = idx_negs[0]
+
+    # todo: find pass-pass
+    return idx_sentinel
+
+
+def arr_to_gtp(arr: np.array, sgf: bool = False):
+    idx_termination = locate_game_last_move(arr)
+    moves = arr[:idx_termination]
     if sgf:
         moves = [to_sgf(from_flat(i)) for i in moves]
         # B[cc];W[cd];
