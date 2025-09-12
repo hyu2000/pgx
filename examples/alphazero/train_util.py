@@ -25,7 +25,7 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         policy_output1 = batch_policy1(state, subkey1)
         policy_output2 = batch_policy2(state, subkey2)
         is_my_turn = state.current_player == policy1_player  #).reshape((-1, 1))
-        step_count = state._step_count[0]  # need a single int!
+        step_count = state._step_count.max()  # need a single int; max() since some games may've ended
         # policy_output.action_weights   is action guaranteed to be the argmax?
         action = jnp.where(is_my_turn, policy_output1, policy_output2)
         state = jax.vmap(env.step)(state, action)

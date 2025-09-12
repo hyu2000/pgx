@@ -99,6 +99,10 @@ def flat_to_gtp(flat: int):
     return to_gtp(from_flat(flat))
 
 
+def gtp_to_flat(gtpc) -> int:
+    return to_flat(from_gtp(gtpc))
+
+
 def locate_game_last_move(arr: np.array) -> int:
     """ batch-eval produces game records that may contain actions past actual game termination
 
