@@ -324,19 +324,27 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
     wrates_raw, wrates_mcts = [], []
-    for gen1 in range(80, 110, 10):
+    for gen1 in range(10, 110, 10):
+        player_names = [f'gen{gen1}', f'baseline']
         batch_forward1, _, _ = load_go5_checkpoint_eqx(f'go_5x5C2_250909-160146/{gen1:06d}.ckpt')
         batch_policy1 = batch_forward_to_policy(batch_forward1)
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
-        R, actions = train_util.evaluate(env, key, num_eval_games, batch_policy1, batch_policy2)
+        R, game_records = train_util.evaluate(env, key, num_eval_games, batch_policy1, batch_policy2)
         wrate = (1 + sum(R) / len(R)) * 0.5
         print(f'{gen1=}  raw: Total {len(R)} games, win-rate={wrate}')
         wrates_raw.append(wrate)
-        R, actions = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+        R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
         wrate = (1 + sum(R) / len(R)) * 0.5
         print(f'{gen1=} mcts: Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
         wrates_mcts.append(wrate)
+
+        unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
+        print(counts)
+        games_formatted = format_game_records(env, unique_games, player_names=player_names)
+        print('\n'.join(games_formatted))
+        print()
+
     print('raw policy wrates: ', [f'{x:.3f}' for x in wrates_raw])
     print('mcts wrates: ', [f'{x:.3f}' for x in wrates_mcts])
 
