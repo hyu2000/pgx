@@ -65,7 +65,7 @@ def convert_to_black_view(player_to_start, player0_reward, open_move: Optional[i
     return ('B+R' if black_reward > 0 else 'W+R'), black_player_id
 
 
-def format_game_records(env, game_records: jnp.array, sgf: bool=True, player_names: List[str] = None):
+def format_game_records(env, game_records: jnp.array, sgf: bool=False, player_names: List[str] = None):
     open_move = env._open_move
     records = []
     for game in game_records:
