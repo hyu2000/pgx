@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Iterable
 
 import jax
 import jax.numpy as jnp
@@ -65,13 +65,18 @@ def convert_to_black_view(player_to_start, player0_reward, open_move: Optional[i
     return ('B+R' if black_reward > 0 else 'W+R'), black_player_id
 
 
-def format_game_records(env, game_records: jnp.array, sgf: bool=False, player_names: List[str] = None):
+def format_game_records(env, game_records: jnp.array, sgf: bool=False, player_names: Iterable[str] = None):
     open_move = env._open_move
     records = []
     for game in game_records:
         game_result, black_player_id = convert_to_black_view(game[0], game[1], open_move)
         moves_str = ' '.join([coords.arr_to_gtp(game[2:], sgf=sgf)])
-        black_player_name = player_names[black_player_id] if player_names else f'{black_player_id}'
-        s = f'{black_player_name} {game_result} {moves_str}'
+
+        white_player_id = 1 - black_player_id
+        if player_names:
+            black_player_name, white_player_name = player_names[black_player_id], player_names[white_player_id]
+        else:
+            black_player_name, white_player_name = black_player_id, white_player_id
+        s = f'{black_player_name} {white_player_name} {game_result} {moves_str}'
         records.append(s)
     return records
