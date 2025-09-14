@@ -1,5 +1,6 @@
 import pickle
 import platform
+from typing import Iterable
 
 import jax
 import jax.numpy as jnp
@@ -85,6 +86,8 @@ def load_go5_checkpoint_eqx(fpath = None):
     if not fpath.startswith('/'):
         CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
         fpath = f'{CHECKPOINT_DIR}/{fpath}'
+    if not fpath.endswith('.ckpt'):
+        fpath = f'{fpath}.ckpt'
     model_params, model_state = load_from_ckpt(fpath)
     model_params = eqx.nn.inference_mode(model_params)
     batch_forward = get_batch_forward_fn(model_params, model_state)
@@ -349,8 +352,37 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
     print('mcts wrates: ', [f'{x:.3f}' for x in wrates_mcts])
 
 
-def test_reeval_training_run():
+def show_game_records(game_records: jnp.array, env, player_names: Iterable[str] = None):
+    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
+    print(counts)
+    games_formatted = format_game_records(env, unique_games, player_names=player_names)
+    print('\n'.join(games_formatted))
+
+
+def test_reeval_run():
     """ examine ckpts, keeping a cohort of top models """
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    RUN_ID = 'go_5x5C2_250909-160146'
+    num_simulations = 32
+    num_eval_games = 128
+
+    top_k = []
+    for i_gen in range(10, 110, 10):
+        #
+        cur_player = f'{RUN_ID}/{i_gen:06d}'
+        print(f'Evaluating {cur_player}: {num_simulations=}')
+        batch_forward1, _, _ = load_go5_checkpoint_eqx(f'{cur_player}')
+        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
+            mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
+        for opponent in top_k:
+            opponent_name = f'gen{i_gen-10}'
+            player_names = (f'gen{i_gen}', opponent_name)
+            R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, opponent)
+            print(f'eval {player_names}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
+            show_game_records(game_records, env, player_names)
+        top_k = [batch_forward_mcts1]
 
 
 def test_extract_selfplay_records():
@@ -371,10 +403,7 @@ def test_extract_selfplay_records():
         R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts1)
         print(f'selfplay {i_gen}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
-        unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
-        print(counts)
-        games_formatted = format_game_records(env, unique_games, sgf=False, player_names=player_names)
-        print('\n'.join(games_formatted))
+        show_game_records(game_records, env, player_names)
 
 
 def test_run_eval():
@@ -396,7 +425,4 @@ def test_run_eval():
     R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
-    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
-    print(counts)
-    games_formatted = format_game_records(env, unique_games, sgf=False)
-    print('\n'.join(games_formatted))
+    show_game_records(game_records, env, player_names=None)
