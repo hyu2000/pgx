@@ -322,12 +322,12 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
 
     num_simulations = 32
     num_eval_games = 128
-    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000090.ckpt')
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250906-125418/000075.ckpt')
     batch_policy2 = batch_forward_to_policy(batch_forward2)
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
     wrates_raw, wrates_mcts = [], []
-    for gen1 in range(10, 150, 10):
+    for gen1 in range(100, 150, 10):
         player_names = [f'gen{gen1}', f'baseline']
         batch_forward1, _, _ = load_go5_checkpoint_eqx(f'go_5x5C2_250909-160146/{gen1:06d}.ckpt')
         batch_policy1 = batch_forward_to_policy(batch_forward1)
