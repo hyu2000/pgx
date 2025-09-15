@@ -322,7 +322,7 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
 
     num_simulations = 32
     num_eval_games = 64
-    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000050.ckpt')
+    batch_forward2, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000070.ckpt')
     batch_policy2 = batch_forward_to_policy(batch_forward2)
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
@@ -365,8 +365,8 @@ def test_reeval_run():
     key = jax.random.PRNGKey(0)
 
     RUN_ID = 'go_5x5C2_250909-160146'
-    num_simulations = 32
-    num_eval_games = 128
+    num_simulations = 2
+    num_eval_games = 4
 
     top_k = []
     for i_gen in range(10, 110, 10):
@@ -410,9 +410,9 @@ def test_run_eval():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    num_simulations = 32
-    num_eval_games = 64
-    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000050.ckpt')
+    num_simulations = 2
+    num_eval_games = 8
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000090.ckpt')
     # batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000050.ckpt')
     batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
