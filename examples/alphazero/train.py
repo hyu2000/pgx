@@ -178,19 +178,16 @@ class Sample(NamedTuple):
 def compute_loss_input(data: SelfplayOutput) -> Sample:
     batch_size = config.selfplay_batch_size // num_devices
     # If episode is truncated, there is no value target
-    # auto-reset: the next init state kept the previous terminated/truncated/rewards
+    # auto-reset: only final state is marked as terminated. later states are reset
     # So when we compute value loss, we need to mask it (value_mask=0 means not using it)
     value_mask = jnp.cumsum(data.terminated[::-1, :], axis=0)[::-1, :] >= 1
 
     # Compute value target
     # discount=-1 except 0 for terminated
-    # Be aware of off-by-1 error: rewards are stored at the next init state due to auto-reset, but next init-state shouldn't get that reward
-    # The bug affects value_tgt for init states
     def body_fn(carry, i):
         ix = config.max_num_steps - i - 1
-        v = -1 * carry
-        carry = data.reward[ix] + data.discount[ix] * carry
-        return carry, v
+        v = data.reward[ix] + data.discount[ix] * carry
+        return v, v
 
     _, value_tgt = jax.lax.scan(
         body_fn,
@@ -240,10 +237,14 @@ def main():
     rng_key = jax.random.key(config.seed)
     # Initialize model and opt_state
     rng_key, model_key = jax.random.split(rng_key)
-    init_model, state = create_model(env, config, key=model_key)
-    opt_state = optimizer.init(eqx.filter(init_model, eqx.is_array))
-    # replicates to all devices
+    if config.init_model:
+        print(f'loading init_model from {config.init_model}')
+        init_model, state = load_from_ckpt(f'{CHECKPOINT_DIR}/{config.init_model}.ckpt')
+    else:
+        print(f'initialize model from random')
+        init_model, state = create_model(env, config, key=model_key)
     model = (init_model, state)
+    opt_state = optimizer.init(eqx.filter(init_model, eqx.is_array))
 
     # Prepare checkpoint dir
     now = datetime.datetime.now(tz=ZoneInfo("America/New_York"))
