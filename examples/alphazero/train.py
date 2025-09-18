@@ -95,13 +95,12 @@ def loss_fn(model_params, model_state, samples: train_util.Sample):
     return policy_loss + value_loss, (model_state, policy_loss, value_loss)
 
 
-@partial(eqx.filter_pmap, axis_name="i", in_axes=(None, None, 0), out_axes=(None, None, 0, 0))
+@eqx.filter_jit
 def train(model, opt_state, data: train_util.Sample):
     model_params, model_state = model
     grads, (model_state, policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
         model_params, model_state, data
     )
-    grads = jax.lax.pmean(grads, axis_name="i")
     updates, opt_state = optimizer.update(grads, opt_state)
     model_params = eqx.apply_updates(model_params, updates)
     model = (model_params, model_state)
@@ -198,7 +197,7 @@ def main():
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
         num_updates = samples.obs.shape[0] // config.training_batch_size
         grad_steps += num_updates
-        minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, num_devices, -1) + x.shape[1:]), samples)
+        minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, -1) + x.shape[1:]), samples)
 
         # Training
         policy_losses, value_losses = [], []
