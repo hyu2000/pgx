@@ -13,6 +13,7 @@ from pgx.experimental import coords, auto_reset
 
 
 class SelfplayOutput(NamedTuple):
+    actor: jnp.ndarray  # more for pairplay
     obs: jnp.ndarray
     reward: jnp.ndarray
     terminated: jnp.ndarray
@@ -23,27 +24,28 @@ class SelfplayOutput(NamedTuple):
 @eqx.filter_jit
 def pairplay(env, batch_mcts1, batch_mcts2, num_games: int, config: Config, rng_key) -> SelfplayOutput:
     """ """
-    policy1_player = 0  # starting player is randomized upon env.init
+    policy1_player = 0  # model1 is player0
 
     def step_fn(state, key):
         observation = state.observation
+        actor = state.current_player
 
         key, subkey1, subkey2 = jax.random.split(key, 3)
         policy_output1 = batch_mcts1(state, subkey1)
         policy_output2 = batch_mcts2(state, subkey2)
-        is_my_turn = state.current_player == policy1_player  #).reshape((-1, 1))
+        is_my_turn = actor == policy1_player
         chex.assert_rank(is_my_turn, 1)
         chex.assert_equal_shape([is_my_turn, policy_output1.action])
 
         action = jnp.where(is_my_turn, policy_output1.action, policy_output2.action)
         action_weights = jnp.where(is_my_turn.reshape((-1, 1)), policy_output1.action_weights, policy_output2.action_weights)
 
-        actor = state.current_player
         keys = jax.random.split(key, batch_size)
         state = jax.vmap(auto_reset(env.step, env.init))(state, action, keys)
         discount = -1.0 * jnp.ones_like(state.terminated)
         discount = jnp.where(state.terminated, 0.0, discount)
         return state, SelfplayOutput(
+            actor=actor,
             obs=observation,   # obs is from the perspective of current player too
             action_weights=action_weights,
             reward=state.rewards[jnp.arange(state.rewards.shape[0]), actor],  # reward from the perspective of current player
@@ -144,6 +146,7 @@ def selfplay(env, model, num_games: int, config: Config, rng_key) -> SelfplayOut
 
 
 class Sample(NamedTuple):
+    actor: jnp.ndarray
     obs: jnp.ndarray
     policy_tgt: jnp.ndarray
     value_tgt: jnp.ndarray
@@ -174,6 +177,7 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
     value_tgt = value_tgt[::-1, :]
 
     return Sample(
+        actor=data.actor,
         obs=data.obs,
         policy_tgt=data.action_weights,
         value_tgt=value_tgt,

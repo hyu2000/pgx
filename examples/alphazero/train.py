@@ -95,6 +95,17 @@ def loss_fn(model_params, model_state, samples: train_util.Sample):
     return policy_loss + value_loss, (model_state, policy_loss, value_loss)
 
 
+def shuffle_and_batch(samples: train_util.Sample, batch_size: int, rng_key) -> (train_util.Sample, int):
+    """ Shuffle samples and make minibatches
+    """
+    ixs = jax.random.permutation(rng_key, jnp.arange(samples.obs.shape[0]))
+    samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
+    num_updates = samples.obs.shape[0] // batch_size
+    # TODO we could shave samples so that reshape will always succeed
+    minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, -1) + x.shape[1:]), samples)
+    return minibatches, num_updates
+
+
 @eqx.filter_jit
 def train(model, opt_state, data: train_util.Sample):
     model_params, model_state = model
@@ -187,17 +198,13 @@ def main():
         data: train_util.SelfplayOutput = train_util.selfplay(env, model, config.selfplay_batch_size, config, subkey)
         samples: train_util.Sample = train_util.compute_loss_input(data)
 
-        # Shuffle samples and make minibatches
-        # samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
+        # samples = jax.device_get(samples)  # (#devices, max_num_steps, batch, ...)
         frames += samples.obs.shape[0] * samples.obs.shape[1]
         samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[2:])), samples)
         chex.assert_rank([samples.value_tgt, samples.policy_tgt], [1, 2])
         rng_key, subkey = jax.random.split(rng_key)
-        ixs = jax.random.permutation(subkey, jnp.arange(samples.obs.shape[0]))
-        samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
-        num_updates = samples.obs.shape[0] // config.training_batch_size
+        minibatches, num_updates = shuffle_and_batch(samples, config.training_batch_size, subkey)
         grad_steps += num_updates
-        minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, -1) + x.shape[1:]), samples)
 
         # Training
         policy_losses, value_losses = [], []
