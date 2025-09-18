@@ -373,7 +373,12 @@ def test_eval_cohort():
         ('0909gen90',   'go_5x5C2_250909-160146/000090'),
         ('0909gen140',  'go_5x5C2_250909-160146/000140'),
     ]
-    top_k = {short_name: load_go5_checkpoint_eqx(model_id)[0] for short_name, model_id in cohort}
+    top_k = {}
+    for short_name, model_id in cohort:
+        batch_forward1, _, _ = load_go5_checkpoint_eqx(model_id)
+        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
+            mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
+        top_k[short_name] = batch_forward_mcts1
 
     for i_gen in range(0, 110, 10):
         #
