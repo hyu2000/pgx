@@ -1,12 +1,14 @@
 from functools import partial
 from typing import Optional, List, Iterable, NamedTuple
 
+import chex
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import mctx
 
 import pgx
+from examples.alphazero.config import Config
 from pgx.experimental import coords, auto_reset
 
 
@@ -18,8 +20,8 @@ class SelfplayOutput(NamedTuple):
     discount: jnp.ndarray
 
 
-@partial(eqx.filter_pmap, in_axes=(None, None, 0))
-def selfplay(env, model, rng_key: jnp.ndarray) -> SelfplayOutput:
+@eqx.filter_jit
+def selfplay(env, model, num_games: int, config: Config, rng_key) -> SelfplayOutput:
     model_params, model_state = model
     model_params = eqx.nn.inference_mode(model_params)
     model = (model_params, model_state)
@@ -87,14 +89,15 @@ def selfplay(env, model, rng_key: jnp.ndarray) -> SelfplayOutput:
 
 
     # Run selfplay for max_num_steps by batch
-    batch_size = config.selfplay_batch_size // num_devices
+    batch_size = num_games
     rng_key, sub_key = jax.random.split(rng_key)
     keys = jax.random.split(sub_key, batch_size)
     state = jax.vmap(env.init)(keys)
-    key_seq = jax.random.split(rng_key, env._game.max_termination_steps)
+    key_seq = jax.random.split(rng_key, config.max_num_steps)
     _, data = jax.lax.scan(step_fn, state, key_seq)
 
-    return data  # data.[field]: (time, batch, ...)
+    chex.assert_shape(data.terminated, (config.max_num_steps, num_games))
+    return data  # data.[field]: (time_step, game#, ...)
 
 
 class Sample(NamedTuple):
@@ -104,9 +107,10 @@ class Sample(NamedTuple):
     mask: jnp.ndarray
 
 
-@jax.pmap
+@jax.jit
 def compute_loss_input(data: SelfplayOutput) -> Sample:
-    batch_size = config.selfplay_batch_size // num_devices
+    # batch_size = config.selfplay_batch_size // num_devices
+    max_num_steps, batch_size = data.terminated.shape
     # If episode is truncated, there is no value target
     # auto-reset: only final state is marked as terminated. later states are reset
     # So when we compute value loss, we need to mask it (value_mask=0 means not using it)
@@ -115,14 +119,14 @@ def compute_loss_input(data: SelfplayOutput) -> Sample:
     # Compute value target
     # discount=-1 except 0 for terminated
     def body_fn(carry, i):
-        ix = config.max_num_steps - i - 1
+        ix = max_num_steps - i - 1
         v = data.reward[ix] + data.discount[ix] * carry
         return v, v
 
     _, value_tgt = jax.lax.scan(
         body_fn,
         jnp.zeros(batch_size),
-        jnp.arange(config.max_num_steps),
+        jnp.arange(max_num_steps),
     )
     value_tgt = value_tgt[::-1, :]
 
