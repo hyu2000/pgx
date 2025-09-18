@@ -6,6 +6,8 @@ import jax
 import jax.numpy as jnp
 import pgx
 import equinox as eqx
+
+from examples.alphazero.eval_util import load_cohort, fill_in_batch_mcts, ModelPolicy
 # import haiku as hk
 
 from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
@@ -34,11 +36,13 @@ def sample_legal_action(rng_key, logits, legal_mask):
     return jax.random.categorical(rng_key, logits=masked_logits, axis=-1)
 
 
+CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
+
+
 def load_go5_checkpoint_hk():
     env_id = "go_5x5C2"
     model_id = f"{env_id}_v0"
     # model is a function: model(state.observation)
-    CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
     model = pgx.make_baseline_model(model_id,
                                     download_dir=f'{CHECKPOINT_DIR}/go_5x5C2_250722-193343/000200.ckpt')
     # model is apply(model_params)
@@ -368,32 +372,27 @@ def test_eval_cohort():
     num_simulations = 32
     num_eval_games = 128
 
-    cohort = [
-        ('baseline',    'go_5x5C2_250906-125418/000075'),
-        ('0909gen90',   'go_5x5C2_250909-160146/000090'),
-        ('0909gen140',  'go_5x5C2_250909-160146/000140'),
-    ]
-    top_k = {}
-    for short_name, model_id in cohort:
-        batch_forward1, _, _ = load_go5_checkpoint_eqx(model_id)
-        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
-            mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
-        top_k[short_name] = batch_forward_mcts1
+    cohort = load_cohort({
+        'baseline': 'go_5x5C2_250906-125418/000075',
+        '0909gen90': 'go_5x5C2_250909-160146/000090',
+        '0909gen140': 'go_5x5C2_250909-160146/000140',
+        }, CHECKPOINT_DIR)
+    fill_in_batch_mcts(cohort, env, num_simulations)
 
     for i_gen in range(0, 110, 10):
         #
         cur_player = f'{RUN_ID}/{i_gen:06d}'
         print(f'\nEvaluating {cur_player}: {num_simulations=}')
         batch_forward1, _, _ = load_go5_checkpoint_eqx(f'{cur_player}')
-        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
+        batch_mcts_policy1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
-        for opponent_name, opponent in top_k.items():
+        for opponent_name, opponent in cohort.items():
             player_names = (f'gen{i_gen}', opponent_name)
-            R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, opponent)
+            R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_mcts_policy1, opponent.batch_mcts_policy)
             print(f'eval {player_names}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
             show_game_records(game_records, env, player_names)
         # add/replace prev model
-        top_k[f'prev-10'] = batch_forward_mcts1
+        cohort[f'prev-10'] = ModelPolicy('prev-10', None, (), None, batch_mcts_policy1)
 
 
 def test_extract_selfplay_records():
