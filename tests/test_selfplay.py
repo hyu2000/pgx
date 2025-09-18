@@ -7,7 +7,7 @@ import equinox as eqx
 import pgx
 from examples.alphazero.config import Config
 from examples.alphazero.network import load_from_ckpt, get_batch_forward_fn
-from examples.alphazero.train_util import selfplay, compute_loss_input, pairplay
+from examples.alphazero.train_lib import selfplay, compute_loss_input, pairplay
 from examples.alphazero import mctx_search
 
 
@@ -71,3 +71,7 @@ def test_pairplay():
     chex.assert_equal_shape([data.reward, data.discount, data.terminated])
     print('terminated', data.terminated.sum(axis=0))
     print('reward abs(sum)=', jnp.abs(data.reward).sum(axis=0), 'sum=', data.reward.sum(axis=0))
+
+    samples = compute_loss_input(data)
+    print(samples.value_tgt.shape)
+    print(samples.actor.shape)

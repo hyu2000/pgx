@@ -37,7 +37,7 @@ from examples.alphazero.config import Config
 from pgx.experimental import auto_reset
 from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
-from examples.alphazero import train_util
+from examples.alphazero import train_lib
 
 devices = jax.local_devices()
 num_devices = len(devices)
@@ -81,7 +81,7 @@ lr_schedule_cos = optax.cosine_decay_schedule(
 optimizer = optax.adam(lr_schedule_cos)
 
 
-def loss_fn(model_params, model_state, samples: train_util.Sample):
+def loss_fn(model_params, model_state, samples: train_lib.Sample):
     (logits, value), model_state = eqx.filter_vmap(
         model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch"
     )(samples.obs, model_state)
@@ -95,7 +95,7 @@ def loss_fn(model_params, model_state, samples: train_util.Sample):
     return policy_loss + value_loss, (model_state, policy_loss, value_loss)
 
 
-def shuffle_and_batch(samples: train_util.Sample, batch_size: int, rng_key) -> (train_util.Sample, int):
+def shuffle_and_batch(samples: train_lib.Sample, batch_size: int, rng_key) -> (train_lib.Sample, int):
     """ Shuffle samples and make minibatches
     """
     ixs = jax.random.permutation(rng_key, jnp.arange(samples.obs.shape[0]))
@@ -107,7 +107,7 @@ def shuffle_and_batch(samples: train_util.Sample, batch_size: int, rng_key) -> (
 
 
 @eqx.filter_jit
-def train(model, opt_state, data: train_util.Sample):
+def train(model, opt_state, data: train_lib.Sample):
     model_params, model_state = model
     grads, (model_state, policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
         model_params, model_state, data
@@ -150,9 +150,9 @@ def main():
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey, subkey2 = jax.random.split(rng_key, 3)
-            batch_raw_policy, batch_forward_mcts = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
-            R, records = train_util.evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
-            R_mcts, records = train_util.evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
+            batch_forward_mcts = batch_mcts1
+            # R, records = train_lib.evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
+            R_mcts, records = train_lib.evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
             log.update(
                 {
                     # f"eval/vs_baseline/avg_R": R.mean().item(),
@@ -195,8 +195,10 @@ def main():
 
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
-        data: train_util.SelfplayOutput = train_util.selfplay(env, model, config.selfplay_batch_size, config, subkey)
-        samples: train_util.Sample = train_util.compute_loss_input(data)
+        # data: train_lib.SelfplayOutput = train_lib.selfplay(env, model, config.selfplay_batch_size, config, subkey)
+        batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
+        data: train_lib.SelfplayOutput = train_lib.pairplay(env, batch_mcts1, batch_mcts1, config.selfplay_batch_size, config, subkey)
+        samples: train_lib.Sample = train_lib.compute_loss_input(data)
 
         # samples = jax.device_get(samples)  # (#devices, max_num_steps, batch, ...)
         frames += samples.obs.shape[0] * samples.obs.shape[1]
@@ -209,7 +211,7 @@ def main():
         # Training
         policy_losses, value_losses = [], []
         for i in range(num_updates):
-            minibatch: train_util.Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
+            minibatch: train_lib.Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
             model, opt_state, policy_loss, value_loss = train(model, opt_state, minibatch)
             policy_losses.append(policy_loss.mean().item())
             value_losses.append(value_loss.mean().item())

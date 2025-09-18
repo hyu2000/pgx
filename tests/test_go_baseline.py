@@ -10,8 +10,8 @@ import equinox as eqx
 
 from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
-from examples.alphazero import train_util
-from examples.alphazero.train_util import format_game_records
+from examples.alphazero import train_lib
+from examples.alphazero.train_lib import format_game_records
 
 #from IPython.display import *
 
@@ -360,7 +360,7 @@ def show_game_records(game_records: jnp.array, env, player_names: Iterable[str] 
 
 
 def test_eval_cohort():
-    """ examine ckpts, keeping a cohort of top models """
+    """ eval ckpts against a cohort of top models """
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
