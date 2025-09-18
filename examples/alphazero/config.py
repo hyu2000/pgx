@@ -24,9 +24,11 @@ class Config(BaseModel):
     # eval params
     eval_interval: int = 5
     eval_batch_size: int = 128  # #games
-    baseline: str = 'go_5x5C2_250906-125418/000075.ckpt'
+    init_model: str = None  #'go_5x5C2_250909-160146/000140'
+    baseline: str = 'go_5x5C2_250906-125418/000075'
     checkpoint_interval: int = 5
     wandb_project: str = "pgx-az"
 
     class Config:
         extra = "forbid"
+        frozen = True

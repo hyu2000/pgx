@@ -14,6 +14,8 @@
 
 import datetime
 import os
+
+import chex
 import cloudpickle as pickle
 from zoneinfo import ZoneInfo
 
@@ -79,7 +81,7 @@ lr_schedule_cos = optax.cosine_decay_schedule(
 optimizer = optax.adam(lr_schedule_cos)
 
 
-def loss_fn(model_params, model_state, samples: Sample):
+def loss_fn(model_params, model_state, samples: train_util.Sample):
     (logits, value), model_state = eqx.filter_vmap(
         model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch"
     )(samples.obs, model_state)
@@ -94,7 +96,7 @@ def loss_fn(model_params, model_state, samples: Sample):
 
 
 @partial(eqx.filter_pmap, axis_name="i", in_axes=(None, None, 0), out_axes=(None, None, 0, 0))
-def train(model, opt_state, data: Sample):
+def train(model, opt_state, data: train_util.Sample):
     model_params, model_state = model
     grads, (model_state, policy_loss, value_loss) = eqx.filter_grad(loss_fn, has_aux=True)(
         model_params, model_state, data
@@ -183,14 +185,14 @@ def main():
 
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
-        keys = jax.random.split(subkey, num_devices)
-        data: SelfplayOutput = selfplay(model, keys)
-        samples: Sample = compute_loss_input(data)
+        data: train_util.SelfplayOutput = train_util.selfplay(env, model, config.selfplay_batch_size, config, subkey)
+        samples: train_util.Sample = train_util.compute_loss_input(data)
 
         # Shuffle samples and make minibatches
-        samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
-        frames += samples.obs.shape[0] * samples.obs.shape[1] * samples.obs.shape[2]
-        samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[3:])), samples)
+        # samples = jax.device_get(samples)  # (#devices, batch, max_num_steps, ...)
+        frames += samples.obs.shape[0] * samples.obs.shape[1]
+        samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[2:])), samples)
+        chex.assert_rank([samples.value_tgt, samples.policy_tgt], [1, 2])
         rng_key, subkey = jax.random.split(rng_key)
         ixs = jax.random.permutation(subkey, jnp.arange(samples.obs.shape[0]))
         samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
@@ -201,13 +203,13 @@ def main():
         # Training
         policy_losses, value_losses = [], []
         for i in range(num_updates):
-            minibatch: Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
+            minibatch: train_util.Sample = jax.tree_util.tree_map(lambda x: x[i], minibatches)
             model, opt_state, policy_loss, value_loss = train(model, opt_state, minibatch)
             policy_losses.append(policy_loss.mean().item())
             value_losses.append(value_loss.mean().item())
 
         policy_loss = sum(policy_losses) / len(policy_losses)
-        value_loss = sum(value_losses) / len(value_losses)
+        value_loss  = sum( value_losses) / len( value_losses)
 
         et = time.time()
         hours += (et - st) / 3600
