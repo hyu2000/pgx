@@ -7,7 +7,8 @@ import equinox as eqx
 import pgx
 from examples.alphazero.config import Config
 from examples.alphazero.network import load_from_ckpt, get_batch_forward_fn
-from examples.alphazero.train_util import selfplay, compute_loss_input
+from examples.alphazero.train_util import selfplay, compute_loss_input, pairplay
+from examples.alphazero import mctx_search
 
 
 def load_go5_checkpoint_eqx(fpath = None):
@@ -49,7 +50,24 @@ def test_selfplay():
     chex.assert_shape(data.terminated, (config.max_num_steps, num_games))
     chex.assert_equal_shape([data.reward, data.discount, data.terminated])
     print('terminated', data.terminated.sum(axis=0))
-    print('reward', jnp.abs(data.reward).sum(axis=0), data.reward.sum(axis=0))
+    print('reward abs(sum)=', jnp.abs(data.reward).sum(axis=0), 'sum=', data.reward.sum(axis=0))
 
     samples = compute_loss_input(data)
     print(samples.value_tgt)
+
+
+def test_pairplay():
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    config = Config()
+    num_games = 4
+    batch_forward1, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000140.ckpt')
+    batch_mcts1 = mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, 2)
+
+    data = pairplay(env, batch_mcts1, batch_mcts1, num_games, config, key)
+    print(data.terminated.shape)
+    chex.assert_shape(data.terminated, (config.max_num_steps, num_games))
+    chex.assert_equal_shape([data.reward, data.discount, data.terminated])
+    print('terminated', data.terminated.sum(axis=0))
+    print('reward abs(sum)=', jnp.abs(data.reward).sum(axis=0), 'sum=', data.reward.sum(axis=0))
