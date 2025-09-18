@@ -364,20 +364,25 @@ def test_eval_cohort():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    RUN_ID = 'go_5x5C2_250909-160146'
+    RUN_ID = 'go_5x5C2_250917-210117'
     num_simulations = 32
     num_eval_games = 128
 
-    top_k = []
-    for i_gen in range(100, 150, 10):
+    cohort = [
+        ('baseline', 'go_5x5C2_250906-125418/000075'),
+        ('gen90',    'go_5x5C2_250909-160146/000090'),
+        ('gen140',   'go_5x5C2_250909-160146/000140'),
+    ]
+    top_k = {short_name: load_go5_checkpoint_eqx(model_id)[0] for short_name, model_id in cohort}
+
+    for i_gen in range(0, 110, 10):
         #
         cur_player = f'{RUN_ID}/{i_gen:06d}'
         print(f'Evaluating {cur_player}: {num_simulations=}')
         batch_forward1, _, _ = load_go5_checkpoint_eqx(f'{cur_player}')
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
-        for opponent in top_k:
-            opponent_name = f'gen{i_gen-10}'
+        for opponent_name, opponent in top_k.items():
             player_names = (f'gen{i_gen}', opponent_name)
             R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, opponent)
             print(f'eval {player_names}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
@@ -410,9 +415,9 @@ def test_run_eval():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    num_simulations = 2
+    num_simulations = 32
     num_eval_games = 8
-    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000090.ckpt')
+    batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000140.ckpt')
     # batch_forward1, _, _ = load_go5_checkpoint_eqx('go_5x5C2_250907-093737/000050.ckpt')
     batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
