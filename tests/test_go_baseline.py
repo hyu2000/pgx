@@ -369,16 +369,16 @@ def test_eval_cohort():
     num_eval_games = 128
 
     cohort = [
-        ('baseline', 'go_5x5C2_250906-125418/000075'),
-        ('gen90',    'go_5x5C2_250909-160146/000090'),
-        ('gen140',   'go_5x5C2_250909-160146/000140'),
+        ('baseline',    'go_5x5C2_250906-125418/000075'),
+        ('0909gen90',   'go_5x5C2_250909-160146/000090'),
+        ('0909gen140',  'go_5x5C2_250909-160146/000140'),
     ]
     top_k = {short_name: load_go5_checkpoint_eqx(model_id)[0] for short_name, model_id in cohort}
 
     for i_gen in range(0, 110, 10):
         #
         cur_player = f'{RUN_ID}/{i_gen:06d}'
-        print(f'Evaluating {cur_player}: {num_simulations=}')
+        print(f'\nEvaluating {cur_player}: {num_simulations=}')
         batch_forward1, _, _ = load_go5_checkpoint_eqx(f'{cur_player}')
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
@@ -387,7 +387,8 @@ def test_eval_cohort():
             R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, opponent)
             print(f'eval {player_names}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
             show_game_records(game_records, env, player_names)
-        top_k = [batch_forward_mcts1]
+        # add/replace prev model
+        top_k[f'prev-10'] = batch_forward_mcts1
 
 
 def test_extract_selfplay_records():
