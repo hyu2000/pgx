@@ -1,5 +1,6 @@
 typing_extensions>=4.2.0
 jax[cuda]
+chex
 cloudpickle
 dm-haiku
 equinox
