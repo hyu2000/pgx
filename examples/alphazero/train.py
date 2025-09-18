@@ -34,6 +34,8 @@ import wandb
 from omegaconf import OmegaConf
 
 from examples.alphazero.config import Config
+from examples.alphazero.eval_util import load_cohort, fill_in_batch_mcts
+from examples.alphazero.mctx_search import batch_fwd_mcts_to_policy
 from pgx.experimental import auto_reset
 from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
@@ -55,16 +57,20 @@ def get_batch_fwd_mcts_for_model(model, num_simulations: int):
     batch_forward = get_batch_forward_fn(model_params, model_state)
 
     batch_policy = batch_forward_to_policy(batch_forward)
-    batch_mcts_policy = mctx_search.batch_fwd_mcts_to_policy(mctx_search.get_batch_fwd_mcts(
-        batch_forward, env.step, num_simulations=num_simulations))
-    return batch_policy, batch_mcts_policy
+    batch_mcts = mctx_search.get_batch_fwd_mcts(
+        batch_forward, env.step, num_simulations=num_simulations)
+    return batch_policy, batch_mcts
 
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-baseline_id = config.baseline
-baseline_model = load_from_ckpt(f'{CHECKPOINT_DIR}/{baseline_id}.ckpt')
-baseline_raw, baseline_mcts = get_batch_fwd_mcts_for_model(baseline_model, config.num_simulations)
+baseline_cohort = load_cohort({
+    'baseline': 'go_5x5C2_250906-125418/000075',
+    # '0909gen90': 'go_5x5C2_250909-160146/000090',
+    # '0909gen140': 'go_5x5C2_250909-160146/000140',
+    '0917gen100': 'go_5x5C2_250917-210117/000100'
+}, CHECKPOINT_DIR)
+fill_in_batch_mcts(baseline_cohort, env, config.num_simulations)
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -149,19 +155,13 @@ def main():
     while True:
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
-            rng_key, subkey, subkey2 = jax.random.split(rng_key, 3)
-            batch_forward_mcts = batch_mcts1
-            # R, records = train_lib.evaluate(env, subkey, config.eval_batch_size, batch_raw_policy, baseline_raw)
-            R_mcts, records = train_lib.evaluate(env, subkey2, config.eval_batch_size, batch_forward_mcts, baseline_mcts)
-            log.update(
-                {
-                    # f"eval/vs_baseline/avg_R": R.mean().item(),
-                    f"eval/vs_baseline/win_rate": ((R == 1).sum() / R.size).item(),
-                    f"eval/vs_mcts/win_rate": ((R_mcts == 1).sum() / R_mcts.size).item(),
-                    f"eval/vs_baseline/draw_rate": ((R == 0).sum() / R.size).item(),
-                    # f"eval/vs_baseline/lose_rate": ((R == -1).sum() / R.size).item(),
-                }
-            )
+            rng_key, subkey = jax.random.split(rng_key)
+            for opponent in baseline_cohort.values():
+                batch_mcts_policy = batch_fwd_mcts_to_policy(batch_mcts1)
+                R, records = train_lib.evaluate(env, subkey, config.eval_batch_size, batch_mcts_policy, opponent.batch_mcts_policy)
+                log.update({
+                    f"eval/vs_{opponent.name}/win_rate": ((R == 1).sum() / R.size).item(),
+                })
 
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
@@ -196,7 +196,7 @@ def main():
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         # data: train_lib.SelfplayOutput = train_lib.selfplay(env, model, config.selfplay_batch_size, config, subkey)
-        batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
+        _, batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
         data: train_lib.SelfplayOutput = train_lib.pairplay(env, batch_mcts1, batch_mcts1, config.selfplay_batch_size, config, subkey)
         samples: train_lib.Sample = train_lib.compute_loss_input(data)
 
