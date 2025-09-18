@@ -21,6 +21,87 @@ class SelfplayOutput(NamedTuple):
 
 
 @eqx.filter_jit
+def pairplay(env, model1, model2, num_games: int, config: Config, rng_key) -> SelfplayOutput:
+    """ """
+    model_params, model_state = model1
+    model_params = eqx.nn.inference_mode(model_params)
+    model = (model_params, model_state)
+    arr, static = eqx.partition(model, eqx.is_array)
+
+    def recurrent_fn(model, rng_key: jnp.ndarray, action: jnp.ndarray, state: pgx.State):
+        del rng_key
+        model = eqx.combine(model, static)
+        model_params, model_state = model
+
+        current_player = state.current_player
+        state = jax.vmap(env.step)(state, action)
+
+        (logits, value), _ = eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
+            state.observation, model_state
+        )
+        # mask invalid actions
+        logits = logits - jnp.max(logits, axis=-1, keepdims=True)
+        logits = jnp.where(state.legal_action_mask, logits, jnp.finfo(logits.dtype).min)
+
+        reward = state.rewards[jnp.arange(state.rewards.shape[0]), current_player]
+        value = jnp.where(state.terminated, 0.0, value)
+        discount = -1.0 * jnp.ones_like(value)
+        discount = jnp.where(state.terminated, 0.0, discount)
+
+        recurrent_fn_output = mctx.RecurrentFnOutput(
+            reward=reward,
+            discount=discount,
+            prior_logits=logits,
+            value=value,
+        )
+        return recurrent_fn_output, state
+
+    def step_fn(state, key) -> SelfplayOutput:
+        key1, key2 = jax.random.split(key)
+        observation = state.observation
+
+        (logits, value), _ = eqx.filter_vmap(model_params, in_axes=(0, None), out_axes=(0, None), axis_name="batch")(
+            state.observation, model_state
+        )
+        root = mctx.RootFnOutput(prior_logits=logits, value=value, embedding=state)
+
+        policy_output = mctx.gumbel_muzero_policy(
+            params=arr,
+            rng_key=key1,
+            root=root,
+            recurrent_fn=recurrent_fn,
+            num_simulations=config.num_simulations,
+            invalid_actions=~state.legal_action_mask,
+            qtransform=partial(mctx.qtransform_completed_by_mix_value, rescale_values=False),
+            gumbel_scale=1.0,
+        )
+        actor = state.current_player
+        keys = jax.random.split(key2, batch_size)
+        state = jax.vmap(auto_reset(env.step, env.init))(state, policy_output.action, keys)
+        discount = -1.0 * jnp.ones_like(value)
+        discount = jnp.where(state.terminated, 0.0, discount)
+        return state, SelfplayOutput(
+            obs=observation,   # obs is from the perspective of current player too
+            action_weights=policy_output.action_weights,
+            reward=state.rewards[jnp.arange(state.rewards.shape[0]), actor],  # reward from the perspective of current player
+            terminated=state.terminated,
+            discount=discount,
+        )
+
+
+    # Run selfplay for max_num_steps by batch
+    batch_size = num_games
+    rng_key, sub_key = jax.random.split(rng_key)
+    keys = jax.random.split(sub_key, batch_size)
+    state = jax.vmap(env.init)(keys)
+    key_seq = jax.random.split(rng_key, config.max_num_steps)
+    _, data = jax.lax.scan(step_fn, state, key_seq)
+
+    chex.assert_shape(data.terminated, (config.max_num_steps, num_games))
+    return data  # data.[field]: (time_step, game#, ...)
+
+
+@eqx.filter_jit
 def selfplay(env, model, num_games: int, config: Config, rng_key) -> SelfplayOutput:
     model_params, model_state = model
     model_params = eqx.nn.inference_mode(model_params)
