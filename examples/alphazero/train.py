@@ -131,6 +131,7 @@ def train(model, opt_state, data: train_lib.Sample):
 
 def main():
     wandb.init(project=config.wandb_project, config=config.model_dump())
+    print('pairplay cohort: ', [x.name for x in pairplay_cohort])
 
     rng_key = jax.random.key(config.seed)
     # Initialize model and opt_state

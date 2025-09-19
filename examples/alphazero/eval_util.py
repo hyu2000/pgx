@@ -17,6 +17,7 @@ class ModelPolicy:
     model: tuple
 
     batch_forward: Any
+    batch_mcts: Any
     batch_mcts_policy: Any
 
 
@@ -35,14 +36,14 @@ def load_cohort(cohort: Dict[str, str], CHECKPOINT_DIR: str) -> Dict[str, ModelP
     d = {}
     for name, model_id in cohort.items():
         batch_fwd, model_param, model_state = load_checkpoint(model_id, CHECKPOINT_DIR)
-        d[name] = ModelPolicy(name, model_id, (model_param, model_state), batch_fwd, None)
+        d[name] = ModelPolicy(name, model_id, (model_param, model_state), batch_fwd, None, None)
     return d
 
 
 def fill_in_batch_mcts(cohort: Dict[str, ModelPolicy], env, num_simulations: int = 32):
     for mp in cohort.values():
         assert mp.batch_forward is not None
-        mp.batch_mcts_policy = mctx_search.batch_fwd_mcts_to_policy(
-            mctx_search.get_batch_fwd_mcts(
-                mp.batch_forward, env.step, num_simulations=num_simulations
-            ))
+        mp.batch_mcts = mctx_search.get_batch_fwd_mcts(
+            mp.batch_forward, env.step, num_simulations=num_simulations
+        )
+        mp.batch_mcts_policy = mctx_search.batch_fwd_mcts_to_policy(mp.batch_mcts)

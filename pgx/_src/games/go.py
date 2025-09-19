@@ -121,6 +121,7 @@ class Game:
         is_black_win = scores[0] - self.komi > scores[1]
         rewards = lax.select(is_black_win, jnp.float32([1, -1]), jnp.float32([-1, 1]))
         to_play = state.color
+        # the player caused psk is penalized to lose
         rewards = lax.select(state.is_psk, jnp.float32([-1, -1]).at[to_play].set(1.0), rewards)
         rewards = lax.select(self.is_terminal(state), rewards, jnp.zeros(2, dtype=jnp.float32))
         return rewards
