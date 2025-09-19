@@ -337,11 +337,11 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
         batch_policy1 = batch_forward_to_policy(batch_forward1)
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
-        R, game_records = train_util.evaluate(env, key, num_eval_games, batch_policy1, batch_policy2)
+        R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_policy1, batch_policy2)
         wrate = (1 + sum(R) / len(R)) * 0.5
         print(f'{gen1=}  raw: Total {len(R)} games, win-rate={wrate}')
         wrates_raw.append(wrate)
-        R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+        R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
         wrate = (1 + sum(R) / len(R)) * 0.5
         print(f'{gen1=} mcts: Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
         wrates_mcts.append(wrate)
@@ -368,18 +368,19 @@ def test_eval_cohort():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
-    RUN_ID = 'go_5x5C2_250917-210117'
+    RUN_ID = 'go_5x5C2_250919-083857'
     num_simulations = 32
     num_eval_games = 128
 
     cohort = load_cohort({
         'baseline': 'go_5x5C2_250906-125418/000075',
-        '0909gen90': 'go_5x5C2_250909-160146/000090',
+        # '0909gen90': 'go_5x5C2_250909-160146/000090',
         '0909gen140': 'go_5x5C2_250909-160146/000140',
+        '0917gen100': 'go_5x5C2_250917-210117/000100'
         }, CHECKPOINT_DIR)
     fill_in_batch_mcts(cohort, env, num_simulations)
 
-    for i_gen in range(0, 110, 10):
+    for i_gen in range(0, 60, 10):
         #
         cur_player = f'{RUN_ID}/{i_gen:06d}'
         print(f'\nEvaluating {cur_player}: {num_simulations=}')
@@ -410,7 +411,7 @@ def test_extract_selfplay_records():
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(batch_forward1, env.step, num_simulations=num_simulations))
         batch_policy1 = batch_forward_to_policy(batch_forward1)
-        R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts1)
+        R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts1)
         print(f'selfplay {i_gen}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
         show_game_records(game_records, env, player_names)
@@ -432,7 +433,7 @@ def test_run_eval():
     batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
         mctx_search.get_batch_fwd_mcts(batch_forward2, env.step, num_simulations=num_simulations))
     batch_policy2 = batch_forward_to_policy(batch_forward2)
-    R, game_records = train_util.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+    R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
     show_game_records(game_records, env, player_names=None)
