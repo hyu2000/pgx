@@ -125,6 +125,7 @@ def selfplay(env, model, num_games: int, config: Config, rng_key) -> SelfplayOut
         discount = -1.0 * jnp.ones_like(value)
         discount = jnp.where(state.terminated, 0.0, discount)
         return state, SelfplayOutput(
+            actor=jnp.zeros_like(state.terminated),
             obs=observation,   # obs is from the perspective of current player too
             action_weights=policy_output.action_weights,
             reward=state.rewards[jnp.arange(state.rewards.shape[0]), actor],  # reward from the perspective of current player

@@ -72,6 +72,8 @@ baseline_cohort = load_cohort({
 }, CHECKPOINT_DIR)
 fill_in_batch_mcts(baseline_cohort, env, config.num_simulations)
 
+pairplay_cohort = [baseline_cohort['0917gen100']]
+
 
 lr_schedule_exp = optax.exponential_decay(
     init_value=config.learning_rate,
@@ -104,12 +106,15 @@ def loss_fn(model_params, model_state, samples: train_lib.Sample):
 def shuffle_and_batch(samples: train_lib.Sample, batch_size: int, rng_key) -> (train_lib.Sample, int):
     """ Shuffle samples and make minibatches
     """
-    ixs = jax.random.permutation(rng_key, jnp.arange(samples.obs.shape[0]))
+    num_samples = samples.obs.shape[0]
+    num_batches = num_samples // batch_size
+    num_samples_to_keep = num_batches * batch_size
+    if num_samples_to_keep < num_samples:
+        print(f'mini-batching {num_batches=}: {num_samples=} -> {num_samples_to_keep=}')
+    ixs = jax.random.permutation(rng_key, jnp.arange(num_samples))[:num_samples_to_keep]
     samples = jax.tree_util.tree_map(lambda x: x[ixs], samples)  # shuffle
-    num_updates = samples.obs.shape[0] // batch_size
-    # TODO we could shave samples so that reshape will always succeed
-    minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_updates, -1) + x.shape[1:]), samples)
-    return minibatches, num_updates
+    minibatches = jax.tree_util.tree_map(lambda x: x.reshape((num_batches, -1) + x.shape[1:]), samples)
+    return minibatches, num_batches
 
 
 @eqx.filter_jit
@@ -193,17 +198,29 @@ def main():
         log = {"iteration": iteration}
         st = time.time()
 
+        num_selfplay_games, num_pairplay_games = config.selfplay_batch_size // 2, config.selfplay_batch_size
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
-        # data: train_lib.SelfplayOutput = train_lib.selfplay(env, model, config.selfplay_batch_size, config, subkey)
+        data_selfplay: train_lib.SelfplayOutput = train_lib.selfplay(env, model, num_selfplay_games, config, subkey)
+        # pairplay
         _, batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
-        data: train_lib.SelfplayOutput = train_lib.pairplay(env, batch_mcts1, batch_mcts1, config.selfplay_batch_size, config, subkey)
+        opponent = pairplay_cohort[0]
+        batch_mcts2 = opponent.batch_mcts
+        rng_key, subkey = jax.random.split(rng_key)
+        data_pairplay: train_lib.SelfplayOutput = train_lib.pairplay(env, batch_mcts1, batch_mcts2, num_pairplay_games, config, subkey)
+
+        chex.assert_equal_rank([data_selfplay.obs, data_pairplay.obs])
+        data = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=1), data_selfplay, data_pairplay)
         samples: train_lib.Sample = train_lib.compute_loss_input(data)
 
         # samples = jax.device_get(samples)  # (#devices, max_num_steps, batch, ...)
+        # flatten the first two axis (common for all Sample.field)
         frames += samples.obs.shape[0] * samples.obs.shape[1]
         samples = jax.tree_util.tree_map(lambda x: x.reshape((-1, *x.shape[2:])), samples)
         chex.assert_rank([samples.value_tgt, samples.policy_tgt], [1, 2])
+        # filter by actor
+        samples = jax.tree_util.tree_map(lambda x: x[samples.actor == 0], samples)
+
         rng_key, subkey = jax.random.split(rng_key)
         minibatches, num_updates = shuffle_and_batch(samples, config.training_batch_size, subkey)
         grad_steps += num_updates
