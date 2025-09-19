@@ -393,7 +393,7 @@ def test_eval_cohort():
             print(f'eval {player_names}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
             show_game_records(game_records, env, player_names)
         # add/replace prev model
-        cohort[f'prev-10'] = ModelPolicy('prev-10', None, (), None, batch_mcts_policy1)
+        cohort[f'prev-10'] = ModelPolicy('prev-10', None, (), None, None, batch_mcts_policy1)
 
 
 def test_extract_selfplay_records():

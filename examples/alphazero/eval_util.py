@@ -17,8 +17,8 @@ class ModelPolicy:
     model: tuple
 
     batch_forward: Any
-    batch_mcts: Any
-    batch_mcts_policy: Any
+    batch_mcts: Any = None
+    batch_mcts_policy: Any = None
 
 
 def load_checkpoint(fpath: str, CHECKPOINT_DIR: str):
