@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import mctx
+import numpy as np
 
 import pgx
 from examples.alphazero.config import Config
@@ -210,7 +211,7 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         state = jax.vmap(env.step)(state, action)
         R = R + state.rewards[jnp.arange(batch_size), policy1_player]
         action_history = action_history.at[:, step_count].set(action)
-        return (key, state, R, action_history)
+        return key, state, R, action_history
 
     game_record = jnp.ones((batch_size, env._game.max_termination_steps), dtype=jnp.int8) * -1
     _, _, R, game_record = jax.lax.while_loop(lambda x: ~(x[1].terminated.all()), body_fn,
@@ -244,18 +245,41 @@ def convert_to_black_view(player_to_start, player0_reward, open_move: Optional[i
     return ('B+R' if black_reward > 0 else 'W+R'), black_player_id
 
 
-def format_game_records(env, game_records: jnp.array, sgf: bool=False, player_names: Iterable[str] = None):
+def format_game_moves(arr: jnp.array, pass_move: int = 25) -> str:
+    """ trim off stuff past pass-pass """
+    # find pass-pass
+    mask = (arr[1:] == arr[:-1]) & (arr[:-1] == pass_move)
+    if np.any(mask):
+        arr = arr[:np.argmax(mask) + 2]
+
+    moves_str = ' '.join([coords.arr_to_gtp(arr)])
+    return moves_str
+
+
+def format_game_records(env, game_records: jnp.array, counts: jnp.array = None, player_names: Iterable[str] = None,
+                        sgf: bool=False):
+    if counts is not None:
+        assert len(game_records) == len(counts)
+        counts = [f'{x:2d}' for x in counts]
+    else:
+        counts = ['  '] * len(game_records)
     open_move = env._open_move
     records = []
-    for game in game_records:
+    for count, game in zip(counts, game_records):
         game_result, black_player_id = convert_to_black_view(game[0], game[1], open_move)
-        moves_str = ' '.join([coords.arr_to_gtp(game[2:], sgf=sgf)])
+        moves_str = format_game_moves(game[2:], pass_move=25)
 
         white_player_id = 1 - black_player_id
         if player_names:
             black_player_name, white_player_name = player_names[black_player_id], player_names[white_player_id]
         else:
             black_player_name, white_player_name = black_player_id, white_player_id
-        s = f'{black_player_name} {white_player_name} {game_result} {moves_str}'
+        s = f'{black_player_name} {white_player_name} {count} {game_result} {moves_str}'
         records.append(s)
     return records
+
+
+def show_game_records(game_records: jnp.array, env, player_names: Iterable[str] = None):
+    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
+    games_formatted = format_game_records(env, unique_games, counts=counts, player_names=player_names)
+    print('\n'.join(games_formatted))

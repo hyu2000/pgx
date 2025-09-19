@@ -13,7 +13,7 @@ from examples.alphazero.eval_util import load_cohort, fill_in_batch_mcts, ModelP
 from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
 from examples.alphazero import train_lib
-from examples.alphazero.train_lib import format_game_records
+from examples.alphazero.train_lib import format_game_records, show_game_records
 
 #from IPython.display import *
 
@@ -356,13 +356,6 @@ num_simulations=64: Total 64 games, win-rate= 0.78125
     print('mcts wrates: ', [f'{x:.3f}' for x in wrates_mcts])
 
 
-def show_game_records(game_records: jnp.array, env, player_names: Iterable[str] = None):
-    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
-    print(counts)
-    games_formatted = format_game_records(env, unique_games, player_names=player_names)
-    print('\n'.join(games_formatted))
-
-
 def test_eval_cohort():
     """ eval ckpts against a cohort of top models """
     env = pgx.make("go_5x5C2")
@@ -436,4 +429,4 @@ def test_run_eval():
     R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
     print(f'Total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
-    show_game_records(game_records, env, player_names=None)
+    show_game_records(game_records, env, player_names=('model1', 'model2'))

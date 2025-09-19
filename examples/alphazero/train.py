@@ -36,6 +36,7 @@ from omegaconf import OmegaConf
 from examples.alphazero.config import Config
 from examples.alphazero.eval_util import load_cohort, fill_in_batch_mcts
 from examples.alphazero.mctx_search import batch_fwd_mcts_to_policy
+from examples.alphazero.train_lib import show_game_records
 from pgx.experimental import auto_reset
 from examples.alphazero.network import create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
@@ -64,15 +65,16 @@ def get_batch_fwd_mcts_for_model(model, num_simulations: int):
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 assert(os.path.isdir(CHECKPOINT_DIR))
-baseline_cohort = load_cohort({
+cohorts = load_cohort({
     'baseline': 'go_5x5C2_250906-125418/000075',
     # '0909gen90': 'go_5x5C2_250909-160146/000090',
-    # '0909gen140': 'go_5x5C2_250909-160146/000140',
+    '0909gen140': 'go_5x5C2_250909-160146/000140',
     '0917gen100': 'go_5x5C2_250917-210117/000100'
 }, CHECKPOINT_DIR)
-fill_in_batch_mcts(baseline_cohort, env, config.num_simulations)
+fill_in_batch_mcts(cohorts, env, config.num_simulations)
 
-pairplay_cohort = [baseline_cohort['0917gen100']]
+evaluate_cohort = [cohorts['baseline'], cohorts['0909gen140'], cohorts['0917gen100']]
+pairplay_cohort = [cohorts['0909gen140']]
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -162,12 +164,15 @@ def main():
         if (1 + iteration) % config.eval_interval == 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
-            for opponent in baseline_cohort.values():
+            for opponent in evaluate_cohort:
                 batch_mcts_policy = batch_fwd_mcts_to_policy(batch_mcts1)
                 R, records = train_lib.evaluate(env, subkey, config.eval_batch_size, batch_mcts_policy, opponent.batch_mcts_policy)
+                win_rate = ((R == 1).sum() / R.size).item()
                 log.update({
-                    f"eval/vs_{opponent.name}/win_rate": ((R == 1).sum() / R.size).item(),
+                    f"eval/vs_{opponent.name}/win_rate": win_rate,
                 })
+                print(f'\nEvaluate gen{iteration} vs {opponent.name}: {win_rate:.2f}')
+                show_game_records(records, env, (f'gen{iteration}', opponent.name))
 
         if iteration % config.checkpoint_interval == 0:
             # Store checkpoints
