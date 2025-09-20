@@ -152,6 +152,7 @@ def main():
     now = now.strftime("%y%m%d-%H%M%S")
     ckpt_dir = os.path.join(CHECKPOINT_DIR, f"{config.env_id}_{now}")
     os.makedirs(ckpt_dir, exist_ok=True)
+    print(f'checkpoint to {ckpt_dir}')
 
     # Initialize logging dict
     iteration: int = 0
@@ -161,7 +162,7 @@ def main():
     log = {"iteration": iteration, "hours": hours, "frames": frames, "grad_steps": grad_steps}
 
     while True:
-        if (1 + iteration) % config.eval_interval == 0:
+        if iteration % config.eval_interval == 0 and iteration > 0:
             # Evaluation
             rng_key, subkey = jax.random.split(rng_key)
             for opponent in evaluate_cohort:
@@ -204,19 +205,25 @@ def main():
         log = {"iteration": iteration}
         st = time.time()
 
-        num_selfplay_games, num_pairplay_games = config.selfplay_batch_size // 2, config.selfplay_batch_size
+        num_selfplay_games = int(config.selfplay_batch_size * config.selfplay_ratio)
+        num_pairplay_games = (config.selfplay_batch_size - num_selfplay_games) * 2
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         data_selfplay: train_lib.SelfplayOutput = train_lib.selfplay(env, model, num_selfplay_games, config, subkey)
         # pairplay
-        _, batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
-        opponent = pairplay_cohort[0]
-        batch_mcts2 = opponent.batch_mcts
-        rng_key, subkey = jax.random.split(rng_key)
-        data_pairplay: train_lib.SelfplayOutput = train_lib.pairplay(env, batch_mcts1, batch_mcts2, num_pairplay_games, config, subkey)
+        data = data_selfplay
+        if num_pairplay_games > 0:
+            _, batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
+            for opponent in pairplay_cohort:
+                rng_key, subkey = jax.random.split(rng_key)
+                data_pairplay: train_lib.SelfplayOutput = train_lib.pairplay(
+                    env, batch_mcts1, opponent.batch_mcts,
+                    num_pairplay_games // len(pairplay_cohort),
+                    config, subkey)
 
-        chex.assert_equal_rank([data_selfplay.obs, data_pairplay.obs])
-        data = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=1), data_selfplay, data_pairplay)
+                chex.assert_equal_rank([data.obs, data_pairplay.obs])
+                data = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x, y], axis=1), data, data_pairplay)
+
         samples: train_lib.Sample = train_lib.compute_loss_input(data)
 
         # samples = jax.device_get(samples)  # (#devices, max_num_steps, batch, ...)

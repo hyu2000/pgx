@@ -14,6 +14,7 @@ class Config(BaseModel):
     bn_mode: str = 'batch'
     # selfplay params
     selfplay_batch_size: int = 512   # #games
+    selfplay_ratio: float = 0.25   # selfplay/pairplay split
     num_simulations: int = 32
     max_num_steps: int = 64  # max_num_moves per game
     # training params
