@@ -1,3 +1,4 @@
+from collections import Counter
 from functools import partial
 from typing import Optional, List, Iterable, NamedTuple
 
@@ -256,7 +257,7 @@ def format_game_moves(arr: jnp.array, pass_move: int = 25) -> str:
     return moves_str
 
 
-def format_game_records(env, game_records: jnp.array, counts: jnp.array = None, player_names: Iterable[str] = None,
+def _format_game_records(env, game_records: jnp.array, counts: jnp.array = None, player_names: Iterable[str] = None,
                         sgf: bool=False):
     if counts is not None:
         assert len(game_records) == len(counts)
@@ -279,7 +280,24 @@ def format_game_records(env, game_records: jnp.array, counts: jnp.array = None, 
     return records
 
 
+def format_game_record(record: jnp.array, open_move: str = None, player_names = None) -> str:
+    game_result, black_player_id = convert_to_black_view(record[0], record[1], open_move)
+    moves_str = format_game_moves(record[2:], pass_move=25)
+
+    white_player_id = 1 - black_player_id
+    if player_names:
+        black_player_name, white_player_name = player_names[black_player_id], player_names[white_player_id]
+    else:
+        black_player_name, white_player_name = black_player_id, white_player_id
+    s = f'{black_player_name} {white_player_name} {game_result} {moves_str}'
+    return s
+
+
 def show_game_records(game_records: jnp.array, env, player_names: Iterable[str] = None):
-    unique_games, counts = jnp.unique(game_records, axis=0, return_counts=True)
-    games_formatted = format_game_records(env, unique_games, counts=counts, player_names=player_names)
-    print('\n'.join(games_formatted))
+    # should trim games before unique & counting
+    open_move = env._open_move
+    game_strs = [format_game_record(x, open_move=open_move, player_names=player_names) for x in game_records]
+    cnter = Counter(game_strs)
+    # add count, sort by game_str
+    for s, cnt in sorted(cnter.items()):
+        print(f'{cnt:3d} {s}')
