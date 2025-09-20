@@ -164,9 +164,10 @@ def main():
     while True:
         if iteration % config.eval_interval == 0 and iteration > 0:
             # Evaluation
+            _, batch_mcts1 = get_batch_fwd_mcts_for_model(model, num_simulations=config.num_simulations)
+            batch_mcts_policy = batch_fwd_mcts_to_policy(batch_mcts1)
             rng_key, subkey = jax.random.split(rng_key)
             for opponent in evaluate_cohort:
-                batch_mcts_policy = batch_fwd_mcts_to_policy(batch_mcts1)
                 R, records = train_lib.evaluate(env, subkey, config.eval_batch_size, batch_mcts_policy, opponent.batch_mcts_policy)
                 win_rate = ((R == 1).sum() / R.size).item()
                 log.update({

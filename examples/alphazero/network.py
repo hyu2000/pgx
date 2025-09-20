@@ -1,5 +1,6 @@
 # We referred to Haiku's ResNet implementation:
 # https://github.com/deepmind/dm-haiku/blob/main/haiku/_src/nets/resnet.py
+import platform
 from typing import Tuple, Any
 
 import cloudpickle as pickle
@@ -169,7 +170,7 @@ def load_from_ckpt(fpath: str, simple: bool = False) -> Tuple[Any, Any]:
     with open(fpath, "rb") as f:
         d = pickle.load(f)
 
-    if simple:
+    if simple or platform.system() != 'Darwin':  # hack: when config changes, this works on colab
         model_params, model_state = d["model"]
         return model_params, model_state
 
