@@ -73,8 +73,8 @@ cohorts = load_cohort({
 }, CHECKPOINT_DIR)
 fill_in_batch_mcts(cohorts, env, config.num_simulations)
 
-evaluate_cohort = [cohorts['baseline'], cohorts['0909gen140'], cohorts['0917gen100']]
-pairplay_cohort = [cohorts['0909gen140']]
+evaluate_cohort = [cohorts['baseline'], cohorts['0917gen100']]
+pairplay_cohort = [cohorts['0917gen100']]
 
 
 lr_schedule_exp = optax.exponential_decay(
@@ -205,7 +205,7 @@ def main():
         log = {"iteration": iteration}
         st = time.time()
 
-        num_selfplay_games = int(config.selfplay_batch_size * config.selfplay_ratio)
+        num_selfplay_games = int(config.selfplay_batch_size * (config.selfplay_ratio if len(pairplay_cohort) > 0 else 1))
         num_pairplay_games = (config.selfplay_batch_size - num_selfplay_games) * 2
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
