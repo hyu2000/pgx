@@ -211,7 +211,7 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
         action = jnp.where(is_my_turn, policy_output1, policy_output2)
         state = jax.vmap(env.step)(state, action)
         R = R + state.rewards[jnp.arange(batch_size), policy1_player]
-        action_history = action_history.at[:, step_count].set(action)
+        action_history = action_history.at[:, step_count].set(action.astype(jnp.int8))
         return key, state, R, action_history
 
     game_record = jnp.ones((batch_size, env._game.max_termination_steps), dtype=jnp.int8) * -1
@@ -220,8 +220,8 @@ def evaluate(env, rng_key, num_games, batch_policy1, batch_policy2):
     if env._open_move:
         game_record = jnp.insert(game_record, 0, env._open_move, axis=1)
     # add meta data: which player started the game (as white in Go5C2), policy1_player (0) win/lose
-    game_record = jnp.insert(game_record, 0, state.current_player, axis=1)
-    game_record = jnp.insert(game_record, 1, R.astype(int), axis=1)
+    game_record = jnp.insert(game_record, 0, state.current_player.astype(jnp.int8), axis=1)
+    game_record = jnp.insert(game_record, 1, R.astype(jnp.int8), axis=1)
     return R, game_record
 
 
