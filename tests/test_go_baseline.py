@@ -302,9 +302,7 @@ def test_mcts_policy():
         state = step_fn(state, policy_output.action)
         # print(state.observation.shape)
 
-
-def test_eval_vs_baseline():
-    """
+"""
 # gen100 wrate against baseline (glorius-yogurt): 69% (policy sampling), 44% (#simu=32)
 mctx is deterministic:
 both num_simulations=1:  Total 64 games, win-rate= 0.421875
@@ -320,7 +318,9 @@ against fixed baseline #simu=1:
 num_simulations=16: Total 64 games, win-rate= 0.671875
 num_simulations=32: Total 64 games, win-rate= 0.65625
 num_simulations=64: Total 64 games, win-rate= 0.78125
-    """
+"""
+
+def test_eval_vs_baseline():
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
@@ -405,6 +405,33 @@ def test_extract_selfplay_records():
         print(f'selfplay {i_gen}: total {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
 
         show_game_records(game_records, env, player_names)
+
+
+def test_num_simu():
+    """ varying #simu """
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
+    cohorts = load_cohort({
+        'baseline': 'go_5x5C2_250906-125418/000075',
+        # '0909gen90': 'go_5x5C2_250909-160146/000090',
+        # '0909gen140': 'go_5x5C2_250909-160146/000140',
+        '0917gen100': 'go_5x5C2_250917-210117/000100'
+    }, CHECKPOINT_DIR)
+
+    model1 = cohorts['baseline']
+    model2 = cohorts['0917gen100']
+    num_eval_games = 128
+
+    for num_simulations in (32, 64, 96, 128):
+        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
+            mctx_search.get_batch_fwd_mcts(model1.batch_forward, env.step, num_simulations=num_simulations))
+        batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
+            mctx_search.get_batch_fwd_mcts(model2.batch_forward, env.step, num_simulations=num_simulations))
+        R, game_records = train_lib.evaluate(env, key, num_eval_games, batch_forward_mcts1, batch_forward_mcts2)
+
+        print(f'{num_simulations}: {len(R)} games, win-rate=', (1 + sum(R) / len(R)) * 0.5)
+        show_game_records(game_records, env, player_names=(model1.name, model2.name))
 
 
 def test_run_eval():
