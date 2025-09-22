@@ -133,7 +133,11 @@ def train(model, opt_state, data: train_lib.Sample):
 
 def main():
     wandb.init(project=config.wandb_project, config=config.model_dump())
+
+    num_selfplay_games = int(config.selfplay_batch_size * (config.selfplay_ratio if len(pairplay_cohort) > 0 else 1))
+    num_pairplay_games = (config.selfplay_batch_size - num_selfplay_games) * 2
     print('pairplay cohort: ', [x.name for x in pairplay_cohort])
+    print(f'selfplay_ratio={config.selfplay_ratio:.3f} {num_selfplay_games=} {num_pairplay_games=}')
 
     rng_key = jax.random.key(config.seed)
     # Initialize model and opt_state
@@ -206,8 +210,6 @@ def main():
         log = {"iteration": iteration}
         st = time.time()
 
-        num_selfplay_games = int(config.selfplay_batch_size * (config.selfplay_ratio if len(pairplay_cohort) > 0 else 1))
-        num_pairplay_games = (config.selfplay_batch_size - num_selfplay_games) * 2
         # Selfplay
         rng_key, subkey = jax.random.split(rng_key)
         data_selfplay: train_lib.SelfplayOutput = train_lib.selfplay(env, model, num_selfplay_games, config, subkey)
