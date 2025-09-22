@@ -413,17 +413,17 @@ def test_num_simu():
     key = jax.random.PRNGKey(0)
 
     cohorts = load_cohort({
-        'baseline': 'go_5x5C2_250906-125418/000075',
+        # 'baseline': 'go_5x5C2_250906-125418/000075',
         # '0909gen90': 'go_5x5C2_250909-160146/000090',
-        # '0909gen140': 'go_5x5C2_250909-160146/000140',
+        '0909gen140': 'go_5x5C2_250909-160146/000140',
         '0917gen100': 'go_5x5C2_250917-210117/000100'
     }, CHECKPOINT_DIR)
 
-    model1 = cohorts['baseline']
+    model1 = cohorts['0909gen140']
     model2 = cohorts['0917gen100']
     num_eval_games = 128
 
-    for num_simulations in (32, 64, 96, 128):
+    for num_simulations in (16, 32, 64, 96, 128):
         batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
             mctx_search.get_batch_fwd_mcts(model1.batch_forward, env.step, num_simulations=num_simulations))
         batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
