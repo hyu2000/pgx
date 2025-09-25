@@ -99,10 +99,12 @@ def load_go5_checkpoint_eqx(fpath = None):
 
 
 def test_load_colab_ckpt():
-    """ debug why we cannot run colab ckpt model locally """
+    """ debug why we cannot run colab ckpt model locally
+    can load  go_5x5C2_250919-083857, but not after go_5x5C2_250920-142953
+    """
     CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
     fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250906-125418/000075.ckpt'
-    # fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250902-163535/000010.ckpt'
+    fpath = f'{CHECKPOINT_DIR}/go_5x5C2_250920-142953/000010.ckpt'
 
     key = jax.random.PRNGKey(0)
     with open(fpath, "rb") as f:
@@ -128,19 +130,21 @@ def test_load_colab_ckpt():
     print(action)
 
 
-def test_run_game_mctx_eqx():
+def test_run_game_save_svg():
     env_id = "go_5x5C2"
     rng_key = jax.random.PRNGKey(1)
     env = pgx.make(env_id)
 
-    batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000100.ckpt')
-
     init_fn = jax.jit(jax.vmap(env.init))
     step_fn = jax.jit(jax.vmap(env.step))
-    batch_fwd_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulations=32)
+
+    num_simulations = 32
+    # batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250909-160146/000100.ckpt')
+    batch_forward, model_param, model_state = load_go5_checkpoint_eqx('go_5x5C2_250922-151231/000065')
+    batch_forward_mcts = mctx_search.get_batch_fwd_mcts(batch_forward, env.step, num_simulations=num_simulations)
 
     history = []
-    batch_size = 5
+    batch_size = 8
     rng_key, key2 = jax.random.split(rng_key)
     keys = jax.random.split(key2, batch_size)
     state = init_fn(keys)
@@ -150,7 +154,7 @@ def test_run_game_mctx_eqx():
         # (logits, value), _ = model_param(state.observation, model_state)
         rng_key, key2 = jax.random.split(rng_key)
         # policy_output = mctx_search.improve_policy_with_mcts(batch_forward, recur_fn, model, state, key2, num_simulations=32)
-        policy_output = batch_fwd_mcts(state, key2)
+        policy_output = batch_forward_mcts(state, key2)
         action = policy_output.action
         state = step_fn(state, action)
         history.append(state)
@@ -422,10 +426,10 @@ def test_num_simu():
     num_eval_games = 128
 
     for model1 in cohorts.values():
+        batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
+            mctx_search.get_batch_fwd_mcts(model1.batch_forward, env.step, num_simulations=32))
         for model2 in [x for x in cohorts.values() if x.name != model1.name]:
             print(f'\neval {model1.name}#32 vs {model2.name}')
-            batch_forward_mcts1 = mctx_search.batch_fwd_mcts_to_policy(
-                mctx_search.get_batch_fwd_mcts(model1.batch_forward, env.step, num_simulations=32))
 
             for num_simulations in (32, 64, 128):
                 batch_forward_mcts2 = mctx_search.batch_fwd_mcts_to_policy(
