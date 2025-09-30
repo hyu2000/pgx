@@ -6,15 +6,21 @@ import equinox as eqx
 
 @jax.jit
 def pure_uses_internal_state(x):
-  state = dict(even=0, odd=0)
-  for i in range(10):
-    state['even' if i % 2 == 0 else 'odd'] += x
-  return state['even'] + state['odd']
+    """ the func is jitted once
+    But it kept track of what happened to x. So it works for different x
+    """
+    print(f'jitting on {x}')
+    jax.debug.print("x={x}", x=x)
+    state = dict(even=0, odd=0)
+    for i in range(10):
+        state['even' if i % 2 == 0 else 'odd'] += x
+
+    return state['even'], state['odd']
 
 
 def test_pure1():
-    assert pure_uses_internal_state(5.) == 50
-    assert pure_uses_internal_state(6.) == 60
+    assert pure_uses_internal_state(5.) == (25, 25)
+    assert pure_uses_internal_state(6.) == (30, 30)
 
 
 def test_sample_vectorized():
@@ -109,6 +115,34 @@ def test_jnp_indexing():
     print(x[:3])
 
 
+def test_sort_game_moves():
+    a = jnp.array([
+        [3, 2, 1],
+        [1, 4, 2],
+        [1, 3, 5],
+        [2, 2, 2],
+        [1, 3, 1],
+    ])
+    indices = jnp.lexsort(a.T[::-1])
+    sorted_a = a[indices]
+    print(indices)
+    print(sorted_a)
+
+
+def test_count_games():
+    a = jnp.array([
+        [1, 2, 3],
+        [1, 2, 3],
+        [2, 3, 4],
+        [1, 2, 3],
+        # [3, 4, 5],
+    ])
+    unique_rows, counts = jnp.unique(a, axis=0, return_counts=True)
+    print()
+    print(unique_rows)
+    print(counts)
+
+
 def test_cumsum():
     """ value mask in compute_loss_input """
     # selfplay: scan on two simultaneous games
@@ -165,8 +199,14 @@ def test_closure_as_pytree():
 def test_jit_evaluate():
     fwd_fn = make_fwd_fn(jnp.arange(3))
     x = 5.0
-    evaluate(fwd_fn, x)
+
+    # make_jaxpr is like jit, traces out what happens in the function with the example inputs.
+    # Hence it also traces that fwd_fn(x) does
+    jpr = jax.make_jaxpr(evaluate, static_argnums=(0,))(fwd_fn, x)
+    print(jpr)
+
+    print('eval fwd_fn', evaluate(fwd_fn, x))
     fwd_fn2 = make_fwd_fn(jnp.arange(3) * 2)
     # eqx.filter_jit treats fwd_fn as static arg, so re-jit everything
     # We could've avoided this by explicitly passing in the plain fwd_fn and model_params as arrays
-    evaluate(fwd_fn2, x)
+    print('eval fwd_fn2', evaluate(fwd_fn2, x))
