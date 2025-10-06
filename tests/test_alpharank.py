@@ -25,7 +25,8 @@ def test_rps_example():
     # and payoff tables) and return only a single-player’s payoff table if so.
     # This ensures Alpha-Rank automatically computes rankings based on the
     # single-population dynamics.
-    _, payoff_tables = utils.is_symmetric_matrix_game(payoff_tables)
+    is_symmetric_game, payoff_tables = utils.is_symmetric_matrix_game(payoff_tables)
+    assert is_symmetric_game
 
     # Compute Alpha-Rank
     (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
@@ -40,6 +41,7 @@ def test_rps_example():
 def get_table_9_AG():
     """ table 9 from AlaphGo 2016 paper """
     names = 'rvp,vp,rp,rv,r,v,p'.split(',')
+    num_agents = len(names)
     df_winrate_pctg = pd.DataFrame([
         [-1,  1, 5, 0, 0, 0, 0],
         [99, -1, 61, 35, 6, 0, 1],
@@ -51,8 +53,9 @@ def get_table_9_AG():
         index=names,
         columns=names
     )
-    df_winrate_pctg.iloc[range(7), range(7)] = 50
-    df = df_winrate_pctg
+    df_winrate_pctg.iloc[range(num_agents), range(num_agents)] = 50
+    # payoff matrix should be row-major
+    df = df_winrate_pctg.T
     return df
 
 
@@ -64,8 +67,28 @@ def test_AlphaGo_data():
     assert all(df_total == 100)
     print(df.iloc[range(7), range(7)])
 
+    strats_of_interest = 'rvp,vp,rp'.split(',')
+    print(df.loc[strats_of_interest, strats_of_interest])
+
 
 def test_AG_example():
-    df = get_table_9_AG()
-    payoff_tables = heuristic_payoff_table.from_matrix_game(df)
+    df = get_table_9_AG()  # - 50
+    strats_of_interest = 'rvp,vp,rp'.split(',')
+    # df = df.loc[strats_of_interest, strats_of_interest]
+    print(df)
+    payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
     print(payoff_tables)
+    is_symmetric_game, payoff_tables = utils.is_symmetric_matrix_game([payoff_tables, payoff_tables])
+    assert is_symmetric_game
+    print(type(payoff_tables[0]))
+
+    payoffs_are_hpt_format = True
+    # alpharank.print_results(payoff_tables, payoffs_are_hpt_format)
+
+    (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
+        payoff_tables, alpha=1
+    )
+
+    payoffs_are_hpt_format = True
+    alpharank.print_results(payoff_tables, payoffs_are_hpt_format, pi=pi)
+
