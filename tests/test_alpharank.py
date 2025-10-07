@@ -40,29 +40,45 @@ def test_rps_example():
 
 def get_table_9_AG():
     """ table 9 from AlaphGo 2016 paper """
-    names = 'rvp,vp,rp,rv,r,v,p'.split(',')
+    names = 'rvp,vp,rp,rv,r,v,p,CS,ZN,PC,FG,GG,CS4,ZN4,PC4'.split(',')
     num_agents = len(names)
-    df_winrate_pctg = pd.DataFrame([
+    arr_table_9 = np.array([
         [-1,  1, 5, 0, 0, 0, 0],
         [99, -1, 61, 35, 6, 0, 1],
         [95, 39, -1, 13, 0, 0, 4],
         [100, 65, 87, -1, 0, 29, 48],
         [100, 94, 100, 100, -1, 78, 78],
         [100, 100, 100, 71, 22, -1, 30],
-        [100,  99,  96, 52, 22, 70, -1]],
+        [100,  99,  96, 52, 22, 70, -1],
+        [100,  74, 98, 80, 5, 36, 8],
+        [99, 84, 98, 92, 6, 40, 100],
+        [100, 99, 100, 98, 78, 87, 55],
+        [100, 99, 100, 100, 78, 100, 65],
+        [100, 100, 100, 100, 99, 67, 99],
+        [77, 12, 53, 15, 0, 0, 0],
+        [86, 25, 67, 14, 0, 0, np.nan],
+        [99, 82, 98, 89, 32, 13, 35],
+    ])
+    arr_full = np.zeros((num_agents, num_agents))
+    arr_full[:, :arr_table_9.shape[1]] = arr_table_9
+    arr_full = np.tril(arr_full)
+    arr_full = arr_full + (np.tril(100 * np.ones((num_agents, num_agents))) - arr_full).T
+    # payoff matrix should be row-major
+    arr_full = arr_full.T
+    np.fill_diagonal(arr_full, 50)
+
+    df_winrate_pctg = pd.DataFrame(arr_full,
         index=names,
         columns=names
     )
-    df_winrate_pctg.iloc[range(num_agents), range(num_agents)] = 50
-    # payoff matrix should be row-major
-    df = df_winrate_pctg.T
-    return df
+    return df_winrate_pctg
 
 
 def test_AlphaGo_data():
     df = get_table_9_AG()
     print()
     print(df)
+    # verify matrix is anti-symmetry
     df_total = df + df.T
     assert all(df_total == 100)
     print(df.iloc[range(7), range(7)])
@@ -74,7 +90,9 @@ def test_AlphaGo_data():
 def test_AG_example():
     df = get_table_9_AG()  # - 50
     strats_of_interest = 'rvp,vp,rp'.split(',')
-    # df = df.loc[strats_of_interest, strats_of_interest]
+    # strats_of_interest = 'v,p,ZN'.split(',')
+    df = df.loc[strats_of_interest, strats_of_interest]
+    print()
     print(df)
     payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
     print(payoff_tables)
@@ -89,6 +107,5 @@ def test_AG_example():
         payoff_tables, alpha=1
     )
 
-    payoffs_are_hpt_format = True
     alpharank.print_results(payoff_tables, payoffs_are_hpt_format, pi=pi)
 
