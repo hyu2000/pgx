@@ -59,11 +59,15 @@ def get_table_9_AG():
         [86, 25, 67, 14, 0, 0, np.nan],
         [99, 82, 98, 89, 32, 13, 35],
     ])
+    N, M = arr_table_9.shape
+    assert N == num_agents
     arr_full = np.zeros((num_agents, num_agents))
     arr_full[:, :arr_table_9.shape[1]] = arr_table_9
+    # we don't have matches among non-AG agents
+    arr_full[M:, M:] = np.nan
     arr_full = np.tril(arr_full)
     arr_full = arr_full + (np.tril(100 * np.ones((num_agents, num_agents))) - arr_full).T
-    # payoff matrix should be row-major
+    # payoff matrix should be row-centric, rather than column-centric as in the original table
     arr_full = arr_full.T
     np.fill_diagonal(arr_full, 50)
 
@@ -87,10 +91,10 @@ def test_AlphaGo_data():
     print(df.loc[strats_of_interest, strats_of_interest])
 
 
-def test_AG_example():
+def test_AG_examples():
     df = get_table_9_AG()  # - 50
-    strats_of_interest = 'rvp,vp,rp'.split(',')
-    # strats_of_interest = 'v,p,ZN'.split(',')
+    strats_of_interest = 'rvp,vp,rp'.split(',')   # rvp dominates
+    strats_of_interest = 'v,p,ZN'.split(',')  # circular
     df = df.loc[strats_of_interest, strats_of_interest]
     print()
     print(df)
