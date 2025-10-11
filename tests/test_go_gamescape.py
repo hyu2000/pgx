@@ -68,6 +68,8 @@ class PayoffTable:
         """ """
         if agent1 > agent2:
             agent1, agent2 = agent2, agent1
+        if (agent1, agent2) not in self._num_games:
+            return None
         return self._num_games[agent1, agent2], self._num_wins[agent1, agent2]
 
     def add_record(self, agent1, agent2, num_games, num_wins):
@@ -75,6 +77,9 @@ class PayoffTable:
             agent1, agent2, num_wins = agent2, agent1, num_games - num_wins
         self._num_wins[agent1, agent2] += num_wins
         self._num_games[agent1, agent2] += num_games
+
+    def show(self):
+        pass
 
 
 def test_payoff():
@@ -88,6 +93,12 @@ def test_payoff():
     assert payoff2.match_record('a', 'b') == (6, 4)
     payoff2.add_record('b', 'a', 1, 1)
     assert payoff2.match_record('a', 'b') == (7, 4)
+
+
+def test_show_payoff():
+    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
+    print(payoff_table._num_games)
+    print(payoff_table._num_wins)
 
 
 def test_eval_gens():
@@ -126,7 +137,7 @@ def test_eval_gens():
         print(f'eval {player_names}: total {len(R)} games, win-rate=', wrate)
         show_game_records(game_records, env, player_names)
 
-        payoff_table.add_record(player1.name, player2.name, len(R), sum(R))
+        payoff_table.add_record(player1.name, player2.name, len(R), sum(R > 0))
 
     payoff_table.save()
 
