@@ -97,6 +97,7 @@ def test_AG_examples():
     strats_of_interest = 'v,p,ZN'.split(',')  # circular
     df = df.loc[strats_of_interest, strats_of_interest]
     print()
+    df = (df - 50) / 100  # normalize -- a-rank sensitive to scale
     print(df)
     payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
     print(payoff_tables)
@@ -108,7 +109,7 @@ def test_AG_examples():
     # alpharank.print_results(payoff_tables, payoffs_are_hpt_format)
 
     (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
-        payoff_tables, alpha=1
+        payoff_tables, alpha=1e2
     )
 
     alpharank.print_results(payoff_tables, payoffs_are_hpt_format, pi=pi)

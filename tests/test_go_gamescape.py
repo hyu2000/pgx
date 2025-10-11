@@ -3,6 +3,8 @@ import os.path
 import itertools
 from collections import defaultdict
 
+import numpy as np
+import pandas as pd
 import pickle
 import platform
 from typing import Iterable
@@ -13,11 +15,18 @@ import pgx
 import equinox as eqx
 
 from examples.alphazero.eval_util import load_cohort, fill_in_batch_mcts, ModelPolicy
-
 from examples.alphazero.network import AZNet, create_model, load_from_ckpt, get_batch_forward_fn, batch_forward_to_policy
 from examples.alphazero import mctx_search
 from examples.alphazero import train_lib
 from examples.alphazero.train_lib import show_game_records
+
+from open_spiel.python.egt import alpharank
+from open_spiel.python.egt import utils as egt_util
+from open_spiel.python.egt import heuristic_payoff_table
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.float_format', '{:.2f}'.format)
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
 
@@ -79,7 +88,24 @@ class PayoffTable:
         self._num_games[agent1, agent2] += num_games
 
     def show(self):
-        pass
+        df = self.get_wrates()
+        print(df)
+
+    def get_wrates(self):
+        assert len(self._num_wins) == len(self._num_games)
+        pairs = self._num_wins.keys()
+        ids = sorted(set(p[0] for p in pairs).union(set(p[1] for p in pairs)))
+        wrates = np.zeros((len(ids), len(ids)))
+        for i1, agent1 in enumerate(ids):
+            for i2, agent2 in enumerate(ids):
+                if agent1 >= agent2:
+                    continue
+                wrate = self._num_wins[agent1, agent2] / self._num_games[agent1, agent2]
+                wrates[i1, i2] = wrate
+                wrates[i2, i1] = 1 - wrate
+        np.fill_diagonal(wrates, 0.5)
+        df_wrates = pd.DataFrame(wrates, index=ids, columns=ids)
+        return df_wrates
 
 
 def test_payoff():
@@ -97,12 +123,48 @@ def test_payoff():
 
 def test_show_payoff():
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
-    print(payoff_table._num_games)
-    print(payoff_table._num_wins)
+    df = payoff_table.get_wrates()
+
+    def shorten_id(model_id: str):
+        s = model_id.replace('go_5x5C2_250917-210117/', '')
+        s = s.replace('go_5x5C2_250906-125418/000075', '0906')
+        s = s.replace('go_5x5C2_250909-160146/000140', '0909')
+        s = s.replace('000', '')
+        return s
+
+    long2short = {s: shorten_id(s) for s in df.index}
+    df = df.rename(index=long2short, columns=long2short)
+
+    print('win rates')
+    print(df)
+
+
+def test_alpharank():
+    """
+go_5x5C2_250917-210117/000080   0.95
+go_5x5C2_250917-210117/000090   0.02
+go_5x5C2_250917-210117/000100   0.03
+    """
+    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
+    df = payoff_table.get_wrates()
+
+    payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
+    is_symmetric_game, payoff_tables = egt_util.is_symmetric_matrix_game([payoff_tables, payoff_tables])
+    assert is_symmetric_game
+
+    # alpharank.print_results(payoff_tables, payoffs_are_hpt_format)
+    (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
+        payoff_tables, alpha=1e2
+    )
+    alpharank.print_results(payoff_tables, True, pi=pi)
+    sdist = pd.Series(pi, index=df.index)
+    print(sdist)
 
 
 def test_eval_gens():
-    """ eval ckpts against a cohort of top models """
+    """ eval ckpts against a cohort of top models
+    22m for a population of 12
+    """
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
 
@@ -122,6 +184,7 @@ def test_eval_gens():
     for i_gen in range(10, 105, 10):
         model_id = f'{RUN_ID}/{i_gen:06d}'
         population_def[model_id] = model_id
+    print('population: ', population_def.keys())
 
     population = load_cohort(population_def, CHECKPOINT_DIR)
     fill_in_batch_mcts(population, env, num_simulations)
