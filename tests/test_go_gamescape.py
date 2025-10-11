@@ -75,11 +75,14 @@ class PayoffTable:
 
     def match_record(self, agent1: str, agent2: str):
         """ """
+        flipped = False
         if agent1 > agent2:
             agent1, agent2 = agent2, agent1
+            flipped = True
         if (agent1, agent2) not in self._num_games:
             return None
-        return self._num_games[agent1, agent2], self._num_wins[agent1, agent2]
+        num_games, num_wins = self._num_games[agent1, agent2], self._num_wins[agent1, agent2]
+        return num_games, (num_games - num_wins) if flipped else num_wins
 
     def add_record(self, agent1, agent2, num_games, num_wins):
         if agent1 > agent2:
@@ -91,7 +94,7 @@ class PayoffTable:
         df = self.get_wrates()
         print(df)
 
-    def get_wrates(self):
+    def get_wrates(self) -> pd.DataFrame:
         assert len(self._num_wins) == len(self._num_games)
         pairs = self._num_wins.keys()
         ids = sorted(set(p[0] for p in pairs).union(set(p[1] for p in pairs)))
@@ -141,6 +144,7 @@ def test_show_payoff():
 
 def test_alpharank():
     """
+    seems monotonic:
 go_5x5C2_250917-210117/000080   0.95
 go_5x5C2_250917-210117/000090   0.02
 go_5x5C2_250917-210117/000100   0.03
@@ -170,6 +174,7 @@ def test_eval_gens():
 
     RUN_ID = 'go_5x5C2_250919-083857'
     RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
+    RUN_ID = 'go_5x5C2_250909-160146'  # all the way to gen150
     num_simulations = 32
     num_eval_games = 128
 
@@ -177,11 +182,11 @@ def test_eval_gens():
     for model_id in {
         'baseline': 'go_5x5C2_250906-125418/000075',
         # '0909gen90': 'go_5x5C2_250909-160146/000090',
-        '0909gen140': 'go_5x5C2_250909-160146/000140',
-        # '0917gen100': 'go_5x5C2_250917-210117/000100'
+        # '0909gen140': 'go_5x5C2_250909-160146/000140',
+        '0917gen100': 'go_5x5C2_250917-210117/000100'
     }.values():
         population_def[model_id] = model_id
-    for i_gen in range(10, 105, 10):
+    for i_gen in range(100, 155, 10):
         model_id = f'{RUN_ID}/{i_gen:06d}'
         population_def[model_id] = model_id
     print('population: ', population_def.keys())
