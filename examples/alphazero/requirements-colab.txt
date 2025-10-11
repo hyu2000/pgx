@@ -10,5 +10,6 @@ optax
 pytest
 wandb
 omegaconf
+open_spiel
 pydantic
 svgwrite
