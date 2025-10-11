@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import platform
-from typing import Iterable
+from typing import Iterable, List
 
 import jax
 import jax.numpy as jnp
@@ -94,21 +94,42 @@ class PayoffTable:
         df = self.get_wrates()
         print(df)
 
-    def get_wrates(self) -> pd.DataFrame:
-        assert len(self._num_wins) == len(self._num_games)
+    def get_agents(self) -> List[str]:
         pairs = self._num_wins.keys()
         ids = sorted(set(p[0] for p in pairs).union(set(p[1] for p in pairs)))
-        wrates = np.zeros((len(ids), len(ids)))
-        for i1, agent1 in enumerate(ids):
-            for i2, agent2 in enumerate(ids):
+        return ids
+
+    def get_wrates(self, agents: List[str]) -> pd.DataFrame:
+        assert len(self._num_wins) == len(self._num_games)
+        agents = sorted(agents)
+
+        wrates = np.full((len(agents), len(agents)), np.nan)
+        for i1, agent1 in enumerate(agents):
+            for i2, agent2 in enumerate(agents):
                 if agent1 >= agent2:
+                    continue
+                if (agent1, agent2) not in self._num_games:
                     continue
                 wrate = self._num_wins[agent1, agent2] / self._num_games[agent1, agent2]
                 wrates[i1, i2] = wrate
                 wrates[i2, i1] = 1 - wrate
+
         np.fill_diagonal(wrates, 0.5)
-        df_wrates = pd.DataFrame(wrates, index=ids, columns=ids)
+        df_wrates = pd.DataFrame(wrates, index=agents, columns=agents)
         return df_wrates
+
+    @staticmethod
+    def shorten_names(df: pd.DataFrame, substr_to_remove: str = None):
+        def shorten_id(model_id: str):
+            s = model_id
+            if substr_to_remove:
+                s = s.replace(substr_to_remove, '')
+            s = s.replace('go_5x5C2_', '')
+            s = s.replace('000', '')
+            return s
+
+        long2short = {s: shorten_id(s) for s in df.index}
+        return df.rename(index=long2short, columns=long2short)
 
 
 def test_payoff():
@@ -150,7 +171,13 @@ go_5x5C2_250917-210117/000090   0.02
 go_5x5C2_250917-210117/000100   0.03
     """
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
-    df = payoff_table.get_wrates()
+    agents_all = payoff_table.get_agents()
+    RUN_ID = 'go_5x5C2_250909-160146'
+    agents = ['go_5x5C2_250906-125418/000075']  #, 'go_5x5C2_250917-210117/000100']
+    agents.extend([x for x in agents_all if x.startswith(RUN_ID)])
+    df = payoff_table.get_wrates(agents)
+    df = payoff_table.shorten_names(df, f'{RUN_ID}/')
+    print('wrates - 0.5:\n', df - 0.5)
 
     payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
     is_symmetric_game, payoff_tables = egt_util.is_symmetric_matrix_game([payoff_tables, payoff_tables])
