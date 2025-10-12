@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import platform
-from typing import Iterable, List
+from typing import Iterable, List, Dict
 
 import jax
 import jax.numpy as jnp
@@ -147,13 +147,15 @@ def test_payoff():
 
 def test_show_payoff():
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
-    df = payoff_table.get_wrates()
+    agents_all = payoff_table.get_agents()
+    df = payoff_table.get_wrates(agents_all)
 
     def shorten_id(model_id: str):
-        s = model_id.replace('go_5x5C2_250917-210117/', '')
-        s = s.replace('go_5x5C2_250906-125418/000075', '0906')
-        s = s.replace('go_5x5C2_250909-160146/000140', '0909')
-        s = s.replace('000', '')
+        # s = model_id.replace('go_5x5C2_250917-210117/', '')
+        # s = s.replace('go_5x5C2_250906-125418/000075', '0906')
+        # s = s.replace('go_5x5C2_250909-160146/000140', '0909')
+        s = model_id.replace('go_5x5C2_', '')
+        s = s.replace('/000', '/')
         return s
 
     long2short = {s: shorten_id(s) for s in df.index}
@@ -169,11 +171,24 @@ def test_alpharank():
 go_5x5C2_250917-210117/000080   0.95
 go_5x5C2_250917-210117/000090   0.02
 go_5x5C2_250917-210117/000100   0.03
+
+'go_5x5C2_250909-160146': gen100 to gen150
+with 250917-210117/100, it dominates
+w/o it: a little cyclic
+250906-125418/075   0.19
+100                 0.09
+110                 0.10
+120                 0.07
+130                 0.01
+140                 0.14
+150                 0.41
+w/o both, 150 dominates
     """
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
     agents_all = payoff_table.get_agents()
-    RUN_ID = 'go_5x5C2_250909-160146'
-    agents = ['go_5x5C2_250906-125418/000075']  #, 'go_5x5C2_250917-210117/000100']
+    RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
+    RUN_ID = 'go_5x5C2_250909-160146'  # all the way to gen150
+    agents = []  #'go_5x5C2_250906-125418/000075', 'go_5x5C2_250917-210117/000100']
     agents.extend([x for x in agents_all if x.startswith(RUN_ID)])
     df = payoff_table.get_wrates(agents)
     df = payoff_table.shorten_names(df, f'{RUN_ID}/')
@@ -196,14 +211,9 @@ def test_eval_gens():
     """ eval ckpts against a cohort of top models
     22m for a population of 12
     """
-    env = pgx.make("go_5x5C2")
-    key = jax.random.PRNGKey(0)
-
     RUN_ID = 'go_5x5C2_250919-083857'
     RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
     RUN_ID = 'go_5x5C2_250909-160146'  # all the way to gen150
-    num_simulations = 32
-    num_eval_games = 128
 
     population_def = {}
     for model_id in {
@@ -218,12 +228,37 @@ def test_eval_gens():
         population_def[model_id] = model_id
     print('population: ', population_def.keys())
 
+    eval_population(population_def)
+
+
+def test_eval_custom():
+    population = [
+        'go_5x5C2_250906-125418/000075',  # baseline
+        'go_5x5C2_250909-160146/000140',  # all the way to gen150
+        'go_5x5C2_250917-210117/000100',  # pure self-play, gen 0 -> 105
+        'go_5x5C2_250920-142953/000050',  # pairplay w/ 0917gen100,
+        'go_5x5C2_250920-204024/000100',  # minibatch -> 128
+        'go_5x5C2_250922-151231/000060',  # pairplay w/ 0917gen100, mini-batch 64
+    ]
+    print(f'population={population}')
+    population_def = {x: x for x in population}
+    eval_population(population_def)
+
+
+def eval_population(population_def: Dict[str,str]):
+    """ run pair-wise eval on population, save results to payoff table """
+    num_simulations = 32
+    num_eval_games = 128
+    env = pgx.make("go_5x5C2")
+    key = jax.random.PRNGKey(0)
+
     population = load_cohort(population_def, CHECKPOINT_DIR)
     fill_in_batch_mcts(population, env, num_simulations)
 
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
     for player1, player2 in itertools.combinations(population.values(), 2):
         if payoff_table.match_record(player1.model_id, player2.model_id) is not None:
+            print(f'Skipping {player1.model_id} vs {player2.model_id}, already in payoff table')
             continue
         player_names = (player1.name, player2.name)
         R, game_records = train_lib.evaluate(env, key, num_eval_games, player1.batch_mcts_policy, player2.batch_mcts_policy)
