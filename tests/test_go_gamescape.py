@@ -26,6 +26,7 @@ from open_spiel.python.egt import heuristic_payoff_table
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
+pd.set_option('display.width', 200)
 pd.set_option('display.float_format', '{:.2f}'.format)
 
 CHECKPOINT_DIR = '/Users/hyu/PycharmProjects/pgx/examples/alphazero/checkpoints' if platform.system() == 'Darwin' else '/content/drive/MyDrive/dlgo/pgx'
@@ -166,8 +167,34 @@ def test_show_payoff():
 
 
 def test_alpharank():
-    """
-    seems monotonic:
+    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
+    agents_all = payoff_table.get_agents()
+
+    population_def = get_custom_population()
+    agents = population_def.values()
+    df = payoff_table.get_wrates(agents)
+    df = payoff_table.shorten_names(df, '2509')
+    print('wrates - 0.5:\n', df - 0.5)
+
+    payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
+    is_symmetric_game, payoff_tables = egt_util.is_symmetric_matrix_game([payoff_tables, payoff_tables])
+    assert is_symmetric_game
+
+    # alpharank.print_results(payoff_tables, payoffs_are_hpt_format)
+    (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
+        payoff_tables, alpha=1e2
+    )
+    alpharank.print_results(payoff_tables, True, pi=pi)
+    sdist = pd.Series(pi, index=df.index)
+    print(sdist)
+
+
+def get_population_gens():
+    """ eval ckpts against a cohort of top models
+    22m for a population of 12
+
+seems monotonic:
+go_5x5C2_250917-210117: gen10 to gen100
 go_5x5C2_250917-210117/000080   0.95
 go_5x5C2_250917-210117/000090   0.02
 go_5x5C2_250917-210117/000100   0.03
@@ -184,33 +211,6 @@ w/o it: a little cyclic
 150                 0.41
 w/o both, 150 dominates
     """
-    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
-    agents_all = payoff_table.get_agents()
-    RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
-    RUN_ID = 'go_5x5C2_250909-160146'  # all the way to gen150
-    agents = []  #'go_5x5C2_250906-125418/000075', 'go_5x5C2_250917-210117/000100']
-    agents.extend([x for x in agents_all if x.startswith(RUN_ID)])
-    df = payoff_table.get_wrates(agents)
-    df = payoff_table.shorten_names(df, f'{RUN_ID}/')
-    print('wrates - 0.5:\n', df - 0.5)
-
-    payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
-    is_symmetric_game, payoff_tables = egt_util.is_symmetric_matrix_game([payoff_tables, payoff_tables])
-    assert is_symmetric_game
-
-    # alpharank.print_results(payoff_tables, payoffs_are_hpt_format)
-    (rhos, rho_m, pi, num_profiles, num_strats_per_population) = alpharank.compute(
-        payoff_tables, alpha=1e2
-    )
-    alpharank.print_results(payoff_tables, True, pi=pi)
-    sdist = pd.Series(pi, index=df.index)
-    print(sdist)
-
-
-def test_eval_gens():
-    """ eval ckpts against a cohort of top models
-    22m for a population of 12
-    """
     RUN_ID = 'go_5x5C2_250919-083857'
     RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
     RUN_ID = 'go_5x5C2_250909-160146'  # all the way to gen150
@@ -223,15 +223,32 @@ def test_eval_gens():
         '0917gen100': 'go_5x5C2_250917-210117/000100'
     }.values():
         population_def[model_id] = model_id
-    for i_gen in range(100, 155, 10):
+    for i_gen in range(10, 155, 20):
         model_id = f'{RUN_ID}/{i_gen:06d}'
         population_def[model_id] = model_id
     print('population: ', population_def.keys())
 
-    eval_population(population_def)
+    return population_def
 
 
-def test_eval_custom():
+def get_custom_population():
+    """ top models from various runs: very cyclic!
+wrates - 0.5:
+                06-125418/075  09-160146/140  17-210117/100  20-142953/050  20-204024/100  22-151231/060
+06-125418/075           0.00           0.26          -0.12           0.05          -0.07           0.03
+09-160146/140          -0.26           0.00          -0.03           0.00           0.13           0.00
+17-210117/100           0.12           0.03           0.00          -0.20          -0.09          -0.16
+20-142953/050          -0.05           0.00           0.20           0.00           0.20           0.13  <-- almost the top model
+20-204024/100           0.07          -0.13           0.09          -0.20           0.00           0.02
+22-151231/060          -0.03           0.00           0.16          -0.13          -0.02           0.00
+Stationary distribution (pi):
+250906-125418/075   0.23
+250909-160146/140   0.10
+250917-210117/100   0.11
+250920-142953/050   0.33
+250920-204024/100   0.19
+250922-151231/060   0.04
+    """
     population = [
         'go_5x5C2_250906-125418/000075',  # baseline
         'go_5x5C2_250909-160146/000140',  # all the way to gen150
@@ -242,16 +259,18 @@ def test_eval_custom():
     ]
     print(f'population={population}')
     population_def = {x: x for x in population}
-    eval_population(population_def)
+    return population_def
 
 
-def eval_population(population_def: Dict[str,str]):
+def test_eval_population():
     """ run pair-wise eval on population, save results to payoff table """
-    num_simulations = 32
-    num_eval_games = 128
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
+    num_simulations = 32
+    num_eval_games = 128
 
+    population_def = get_population_gens()
+    # population_def = get_custom_population()
     population = load_cohort(population_def, CHECKPOINT_DIR)
     fill_in_batch_mcts(population, env, num_simulations)
 
