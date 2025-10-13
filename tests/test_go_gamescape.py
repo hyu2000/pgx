@@ -170,8 +170,9 @@ def test_alpharank():
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
     agents_all = payoff_table.get_agents()
 
-    population_def = get_custom_population()
-    agents = population_def.values()
+    # population_def = get_custom_population()
+    # agents = population_def.values()
+    agents = [x for x in agents_all if x.startswith('go_5x5C2_250909-160146')]
     df = payoff_table.get_wrates(agents)
     df = payoff_table.shorten_names(df, '2509')
     print('wrates - 0.5:\n', df - 0.5)
@@ -262,6 +263,18 @@ Stationary distribution (pi):
     return population_def
 
 
+def get_agents_matching(payoff_table: PayoffTable, prefix: str):
+    agents_all = payoff_table.get_agents()
+    agents = [x for x in agents_all if x.startswith(prefix)]
+    return {x: x for x in agents}
+
+
+def test_get_agents():
+    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
+    p_def = get_agents_matching(payoff_table, 'go_5x5C2_250909')
+    print(p_def.values())
+
+
 def test_eval_population():
     """ run pair-wise eval on population, save results to payoff table """
     env = pgx.make("go_5x5C2")
@@ -269,12 +282,13 @@ def test_eval_population():
     num_simulations = 32
     num_eval_games = 128
 
-    population_def = get_population_gens()
+    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
+    population_def = get_agents_matching(payoff_table, 'go_5x5C2_250909')
+    # population_def = get_population_gens()
     # population_def = get_custom_population()
     population = load_cohort(population_def, CHECKPOINT_DIR)
     fill_in_batch_mcts(population, env, num_simulations)
 
-    payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
     for player1, player2 in itertools.combinations(population.values(), 2):
         if payoff_table.match_record(player1.model_id, player2.model_id) is not None:
             print(f'Skipping {player1.model_id} vs {player2.model_id}, already in payoff table')
