@@ -281,7 +281,7 @@ pytest -s tests/test_go_gamescape.py::test_eval_population 2>&1 | tee /content/d
     """
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
-    num_simulations = 32
+    num_simulations = 64
     num_eval_games = 128
 
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
