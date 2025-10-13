@@ -285,9 +285,9 @@ pytest -s tests/test_go_gamescape.py::test_eval_population 2>&1 | tee /content/d
     num_eval_games = 128
 
     payoff_table = PayoffTable(f'{CHECKPOINT_DIR}/payoff.pkl')
-    population_def = get_agents_matching(payoff_table, 'go_5x5C2_250909')
+    # population_def = get_agents_matching(payoff_table, 'go_5x5C2_250909')
     # population_def = get_population_gens()
-    # population_def = get_custom_population()
+    population_def = get_custom_population()
     print('population: ', population_def.keys())
 
     population = load_cohort(population_def, CHECKPOINT_DIR)
