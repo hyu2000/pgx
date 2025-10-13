@@ -174,7 +174,7 @@ def test_alpharank():
     # agents = population_def.values()
     agents = [x for x in agents_all if x.startswith('go_5x5C2_250909-160146')]
     df = payoff_table.get_wrates(agents)
-    df = payoff_table.shorten_names(df, '2509')
+    df = payoff_table.shorten_names(df, 'go_5x5C2_250909-160146')
     print('wrates - 0.5:\n', df - 0.5)
 
     payoff_tables = heuristic_payoff_table.from_matrix_game(df.values)
@@ -211,6 +211,7 @@ w/o it: a little cyclic
 140                 0.14
 150                 0.41
 w/o both, 150 dominates
+ran from gen50 to gen150: 140/150 dominates
     """
     RUN_ID = 'go_5x5C2_250919-083857'
     RUN_ID = 'go_5x5C2_250917-210117'  # pure self-play, gen 0 -> 105
@@ -227,7 +228,6 @@ w/o both, 150 dominates
     for i_gen in range(10, 155, 20):
         model_id = f'{RUN_ID}/{i_gen:06d}'
         population_def[model_id] = model_id
-    print('population: ', population_def.keys())
 
     return population_def
 
@@ -258,7 +258,6 @@ Stationary distribution (pi):
         'go_5x5C2_250920-204024/000100',  # minibatch -> 128
         'go_5x5C2_250922-151231/000060',  # pairplay w/ 0917gen100, mini-batch 64
     ]
-    print(f'population={population}')
     population_def = {x: x for x in population}
     return population_def
 
@@ -276,7 +275,10 @@ def test_get_agents():
 
 
 def test_eval_population():
-    """ run pair-wise eval on population, save results to payoff table """
+    """ run pair-wise eval on population, save results to payoff table
+
+pytest -s tests/test_go_gamescape.py::test_eval_population 2>&1 | tee /content/drive/MyDrive/dlgo/pgx/eval-gs0909-all.log
+    """
     env = pgx.make("go_5x5C2")
     key = jax.random.PRNGKey(0)
     num_simulations = 32
@@ -286,6 +288,8 @@ def test_eval_population():
     population_def = get_agents_matching(payoff_table, 'go_5x5C2_250909')
     # population_def = get_population_gens()
     # population_def = get_custom_population()
+    print('population: ', population_def.keys())
+
     population = load_cohort(population_def, CHECKPOINT_DIR)
     fill_in_batch_mcts(population, env, num_simulations)
 
