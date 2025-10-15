@@ -68,13 +68,15 @@ assert(os.path.isdir(CHECKPOINT_DIR))
 cohorts = load_cohort({
     'baseline': 'go_5x5C2_250906-125418/000075',
     # '0909gen90': 'go_5x5C2_250909-160146/000090',
-    '0909gen140': 'go_5x5C2_250909-160146/000140',
-    '0917gen100': 'go_5x5C2_250917-210117/000100'
+    # '0909gen140': 'go_5x5C2_250909-160146/000140',
+    # '0917gen100': 'go_5x5C2_250917-210117/000100',
+    '0920pp50': 'go_5x5C2_250920-142953/000050',
+    '0920sp100':   'go_5x5C2_250920-204024/000100',
 }, CHECKPOINT_DIR)
 fill_in_batch_mcts(cohorts, env, config.num_simulations)
 
-evaluate_cohort = [cohorts['baseline'], cohorts['0917gen100']]
-pairplay_cohort = [cohorts['0917gen100']]
+evaluate_cohort = [cohorts['baseline'], cohorts['0920sp100']]
+pairplay_cohort = [cohorts['baseline']]
 
 
 lr_schedule_exp = optax.exponential_decay(

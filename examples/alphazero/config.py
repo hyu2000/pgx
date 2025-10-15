@@ -18,7 +18,7 @@ class Config(BaseModel):
     num_simulations: int = 32
     max_num_steps: int = 64  # max_num_moves per game
     # training params
-    training_batch_size: int = 256   # #samples per mini-batch
+    training_batch_size: int = 128   # #samples per mini-batch
     learning_rate: float = 0.01
     lr_decay_steps: int = 256  # halve LR every #steps
     weight_decay: float = 1e-4
